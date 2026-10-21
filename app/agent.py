@@ -55,10 +55,12 @@ and suggest 2–4 times; the app shows every open time on that day.
 If more than one matches, ask which one.
 - Name every new meeting (create_booking `title`): use the name the user gave, otherwise a short one from the \
 conversation, like "Intro call with Andy" or "Investor sync". Don't ask for a name.
-- Changes (create, reschedule, cancel): once you have everything, call the tool directly. The app shows a confirmation \
+- To fix an existing meeting's name or its attendee's name or email, call update_booking with just what changes. \
+It rebooks the same meeting with the corrections and cancels the original; don't cancel and rebook yourself.
+- Changes (create, reschedule, update, cancel): once you have everything, call the tool directly. The app shows a confirmation \
 card and only runs the action after the user clicks Confirm, so never ask "shall I book it?".
 - If a tool result says the user declined or didn't confirm, acknowledge briefly and don't retry unless asked.
-- Rescheduling gives the booking a NEW uid. Use the new uid for any follow-up.
+- Rescheduling or updating gives the booking a NEW uid. Use the new uid for any follow-up.
 
 How you answer: your final reply is JSON that the app renders.
 - message: the answer in one or two short sentences, in plain words. Lead with the answer. No greetings, no "Good \
@@ -218,13 +220,20 @@ class Agent:
                 return self._final(session, text)
 
             calls = [b for b in response.content if b.type == "tool_use"]
-            gated = [c for c in calls if c.name in self.gated]
-            ready = await asyncio.gather(*(self._read(session, c, seen) for c in calls if c.name not in self.gated))
+            ready = list(await asyncio.gather(*(self._read(session, c, seen) for c in calls if c.name not in self.gated)))
+            gated = []
+            for c in (c for c in calls if c.name in self.gated):
+                # A card for a change that can't run (e.g. a booking with no start) would only fail on Confirm.
+                if missing := self._missing(c):
+                    ready.append({"type": "tool_result", "tool_use_id": c.id, "is_error": True,
+                                  "content": f"Not run: missing {', '.join(missing)}."})
+                else:
+                    gated.append(c)
             if gated:
                 pending = PendingAction(
                     id=uuid.uuid4().hex[:12],
                     calls=gated,
-                    ready_results=list(ready),
+                    ready_results=ready,
                     items=[self._describe(session, c) for c in gated],
                 )
                 session.pending = pending
@@ -273,6 +282,10 @@ class Agent:
         replies = [r.strip() for r in data.get("replies") or [] if r.strip()][:5]
         return Turn(reply=(data.get("message") or "").strip(), times=times, meetings=meetings, suggestions=replies)
 
+    def _missing(self, call: Any) -> list[str]:
+        schema = next((t["input_schema"] for t in self.tools if t["name"] == call.name), {})
+        return [k for k in schema.get("required", []) if call.input.get(k) in (None, "")]
+
     async def _read(self, session: Session, call: Any, seen: set[str]) -> dict[str, Any]:
         """Run a read-only tool, but don't let the model re-run an identical lookup in a loop."""
         key = call.name + json.dumps(call.input, sort_keys=True)
@@ -305,7 +318,7 @@ class Agent:
         """Cache bookings, event types and offered slots, for confirmation cards and to validate the reply."""
         for b in data.get("bookings") or []:
             session.bookings[b["uid"]] = b
-        for key in ("booked", "rescheduled"):
+        for key in ("booked", "rescheduled", "updated"):
             if isinstance(data.get(key), dict):
                 session.bookings[data[key]["uid"]] = data[key]
         for et in data.get("event_types") or []:
@@ -344,6 +357,15 @@ class Agent:
         title = booking.get("title") or f"Booking {args.get('booking_uid')}"
         if call.name == "reschedule_booking":
             return {"action": "Reschedule", "title": title, "when": when(args.get("new_start")), "detail": f"from {booking.get('when', 'its current time')}"}
+        if call.name == "update_booking":
+            attendee = (booking.get("attendees") or [{}])[0]
+            changes = [
+                f"{label}: {attendee.get(field) or '?'} → {args['attendee_' + field]}"
+                for label, field in (("Attendee", "name"), ("Email", "email"))
+                if args.get("attendee_" + field) and args["attendee_" + field] != attendee.get(field)
+            ]
+            return {"action": "Update", "title": args.get("title") or title, "when": booking.get("when", ""),
+                    "detail": " · ".join(changes) or f"was {title}"}
         if call.name == "cancel_booking":
             return {"action": "Cancel", "title": title, "when": booking.get("when", ""), "detail": args.get("reason") or ""}
         return {"action": call.name, "title": "", "when": "", "detail": json.dumps(args)}

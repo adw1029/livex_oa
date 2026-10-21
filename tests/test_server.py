@@ -35,6 +35,7 @@ async def test_tool_annotations_mark_writes(mcp):
     assert tools["create_booking"].read_only_hint is False
     assert tools["cancel_booking"].destructive_hint is True
     assert tools["reschedule_booking"].destructive_hint is True
+    assert tools["update_booking"].destructive_hint is True
 
 
 async def test_afternoon_slots_are_local_and_utc(mcp, cal):
@@ -246,3 +247,35 @@ async def test_cancelling_a_named_meeting_removes_its_one_off_type(mcp, cal):
     await mcp.call_tool("cancel_booking", {"booking_uid": moved.structured_content["rescheduled"]["uid"], "timezone": TZ})
     assert [c[0] for c in cal.calls].count("delete_event_type") == 1
     assert [e["title"] for e in cal.event_types] == ["30 Min Intro", "Office Hours"]
+
+
+async def test_update_rebooks_the_same_meeting_with_corrections(mcp, cal):
+    r = await mcp.call_tool("create_booking", {
+        **BOOK, "event_type_id": 2, "start": tu.to_utc_z(cal.at(14)), "duration_minutes": 60,
+        "location": "attendeeDefined", "location_detail": "Blue Bottle", "guests": ["ops@example.com"], "notes": "bring deck",
+    })
+    old = r.structured_content["booked"]
+    r = await mcp.call_tool("update_booking", {"booking_uid": old["uid"], "timezone": TZ, "attendee_email": "jordan@lee.dev"})
+    assert not r.is_error, r.content[0].text
+    new = r.structured_content["updated"]
+    assert r.structured_content["previous_uid"] == old["uid"] and new["uid"] != old["uid"]
+    assert (new["start"], new["duration_minutes"], new["title"]) == (old["start"], 60, "Intro call with Jordan")
+    assert new["attendees"] == [{"name": "Jordan Lee", "email": "jordan@lee.dev"}]
+    rebook = [c[1] for c in cal.calls if c[0] == "create_booking"][-1]
+    assert rebook["location"] == {"type": "attendeeDefined", "location": "Blue Bottle"}
+    assert rebook["guests"] == ["ops@example.com"] and rebook["allow_conflicts"] is True  # the original holds the slot until cancelled
+    assert cal.bookings[old["uid"]]["status"] == "cancelled"
+    assert [e["title"] for e in cal.event_types] == ["30 Min Intro", "Office Hours", "Intro call with Jordan"]  # old one-off removed
+
+
+async def test_update_renames_and_guards(mcp, cal):
+    uid = cal.seed("30 Min Intro between Founder and Sam", cal.at(10))
+    same = await mcp.call_tool("update_booking", {"booking_uid": uid, "timezone": TZ, "attendee_name": "Sam Rivera"})
+    assert same.is_error and "Nothing to change" in same.content[0].text
+    bad = await mcp.call_tool("update_booking", {"booking_uid": uid, "timezone": TZ, "attendee_email": "sam@"})
+    assert bad.is_error and "doesn't look like an email" in bad.content[0].text
+    r = await mcp.call_tool("update_booking", {"booking_uid": uid, "timezone": TZ, "title": "Design review"})
+    assert r.structured_content["updated"]["title"] == "Design review"
+    assert cal.bookings[uid]["status"] == "cancelled"
+    again = await mcp.call_tool("update_booking", {"booking_uid": uid, "timezone": TZ, "title": "x"})
+    assert again.is_error and "already cancelled" in again.content[0].text

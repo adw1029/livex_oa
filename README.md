@@ -2,18 +2,18 @@
 
 **Conversational scheduling for cal.com.** A chat assistant for a busy founder who would rather type
 *"book a 30-min intro with a candidate Thursday afternoon"* than click through forms. It **books**, **lists**,
-**reschedules**, and **cancels** cal.com events in plain language, from a web UI.
+**reschedules**, **updates** and **cancels** cal.com events in plain language, from a web UI.
 
 **Live demo:** https://d8f0ss1s0decm.cloudfront.net (the access code is in the submission email)
 
-![LiveX.AI Assistant: schedule sidebar, chat, and a booking confirmation card](docs/screenshot.png)
+![LiveX.AI Assistant: Smart view sidebar, a time picker with every open time, and a booking confirmation card](docs/screenshot.png)
 
 ## Highlights
 
 - **Plain-language scheduling.** Relative dates ("tomorrow", "Thursday afternoon", "later today") resolve in your
   timezone. For a vague request ("book a quick call with someone"), the assistant first asks for the day and length,
-  with tap-able options. Once those are known, it shows that day's open times with a few suggested.
-- **Nothing changes without a click.** Every create, reschedule and cancel shows a confirmation card first. Code
+  with tap-able options. Once those are known, it shows every open time that day as a tap-able button.
+- **Nothing changes without a click.** Every create, reschedule, update and cancel shows a confirmation card first. Code
   enforces this, not the prompt.
 - **Smart view and Calendar.** A switch under the date flips between the two modes.
   - **Smart view** (next to the chat): what's up next, with a countdown and a join link, and your next two weeks of
@@ -33,6 +33,7 @@
 | `book a 30-min intro with a candidate Thursday afternoon` | Picks the event type, offers open Thursday times 12–5pm, asks who it's with |
 | `Jordan Lee, jordan@example.com` → pick a time | Shows a confirmation card. Nothing is booked until you click **Book it** |
 | `move it to later that day` | Finds later open times, then shows a reschedule card |
+| `wrong email, it's jordan@lee.dev` | Shows an update card with the change; confirm and the meeting is rebooked with the right email |
 | `cancel that intro` | Shows a cancel card; confirm and it's cancelled |
 
 Each change is visible right away in the cal.com dashboard. The attendee gets cal.com's usual emails, so use an
@@ -47,7 +48,7 @@ Browser (chat UI)
 FastAPI app ── Agent: Claude tool-use loop + confirmation gate
    │  MCP over stdio
    ▼
-calcom_mcp server ── 7 tools, safety checks, timezone math
+calcom_mcp server ── 8 tools, safety checks, timezone math
    │  HTTPS
    ▼
 cal.com v2 API
@@ -61,6 +62,7 @@ cal.com v2 API
 | `list_bookings` | Meetings by date range, status, attendee name or email, or event type | no |
 | `create_booking` | Book a meeting: attendee, guests, length, location; can double-book on request | **yes** |
 | `reschedule_booking` | Move a booking (cal.com issues a new uid) | **yes** |
+| `update_booking` | Fix a meeting's name or attendee name/email: rebooks it identically, then cancels the original | **yes** |
 | `cancel_booking` | Cancel a booking | **yes** |
 
 ## Quick start
@@ -77,16 +79,17 @@ make run                # http://localhost:8000
 Create the cal.com key under *Settings → Security → API keys* (live keys start with `cal_live_`).
 
 ```bash
-make test               # 29 tests, no network or API keys needed
+make test               # 41 tests, no network or API keys needed
 ```
 
 ## Design decisions
 
 **1. The confirmation gate is enforced in code.**
-Every MCP tool declares annotations. Any tool not marked `readOnlyHint` (create, reschedule, cancel) is intercepted:
+Every MCP tool declares annotations. Any tool not marked `readOnlyHint` (create, reschedule, update, cancel) is intercepted:
 the model's `tool_use` is held as a *pending action*, the UI shows a confirmation card, and the call runs only after
 `POST /api/confirm`. Typing "yes" also confirms. Typing anything else closes the pending call with an honest
-"not executed" result, so the model never sees a fake success. See `app/agent.py`.
+"not executed" result, so the model never sees a fake success. A change that is missing a required detail (say, a
+booking with no start time) never becomes a card; the model is told what's missing and tries again. See `app/agent.py`.
 
 **2. Safety checks live in the MCP server, so every client gets them.**
 Before any write, the server re-checks the slot against live availability. It also checks that booking uids exist
@@ -113,6 +116,9 @@ to booking unchanged. See `calcom_mcp/timeutil.py`.
   Claude picks, like "Intro call with Andy"), with a name template of just `{Event type title}`. It copies the
   original type's length, locations and schedule. The one-off type is deleted if the booking fails, or once its
   meeting is cancelled, and it never shows up as a bookable type.
+- **Corrections:** cal.com can't edit a booking's attendee or name. `update_booking` books an identical meeting
+  (same time, length, location, guests, notes) with the fix, using `allowConflicts` because the original still holds
+  the slot, and only then cancels the original. If the new booking fails, the original is untouched.
 - **Stale uids:** a rescheduled booking keeps a `rescheduledToUid`. If the model acts on the old uid, the server's
   error names the new one, so the model can recover.
 - **Durations:** `lengthInMinutes` is only accepted for event types with `lengthInMinutesOptions`. The slots API
@@ -131,8 +137,8 @@ to booking unchanged. See `calcom_mcp/timeutil.py`.
 
 **5. Structured replies, rendered by the app.**
 The model's final answer uses Claude's structured outputs (a JSON schema): a one- or two-sentence `message`, the
-`times` it suggests, the `meetings` it refers to, and up to three tap-able `replies`. The app renders a picker with
-every open time on the suggested days (the suggestions outlined), and meetings as cards with a Join link, so
+`times` it suggests, the `meetings` it refers to, and up to five tap-able `replies`. The app renders a picker with
+every open time on the day Claude settles on, and meetings as cards with a Join link, so
 formatting stays consistent and the model can't ramble.
 The server keeps only times that cal.com actually returned and meetings it actually fetched, so a hallucinated slot
 can't reach the screen. If the model repeats an identical lookup within one request, the server returns "already

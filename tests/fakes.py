@@ -52,16 +52,16 @@ class FakeCal:
         return uid
 
     def _booking(self, uid: str, title: str, start: datetime, attendee: str, status: str = "accepted",
-                 event_type: dict[str, Any] | None = None) -> dict[str, Any]:
+                 event_type: dict[str, Any] | None = None, email: str | None = None, minutes: int = 30) -> dict[str, Any]:
         return {
             "uid": uid,
             "title": title,
             "status": status,
             "start": tu.to_utc_z(start),
-            "end": tu.to_utc_z(start + timedelta(minutes=30)),
-            "duration": 30,
+            "end": tu.to_utc_z(start + timedelta(minutes=minutes)),
+            "duration": minutes,
             "eventType": event_type or {"id": 1, "slug": "intro"},
-            "attendees": [{"name": attendee, "email": f"{attendee.split()[0].lower()}@example.com"}],
+            "attendees": [{"name": attendee, "email": email or f"{attendee.split()[0].lower()}@example.com", "timeZone": "America/Los_Angeles"}],
             "location": "https://cal.com/video/x",
         }
 
@@ -129,7 +129,16 @@ class FakeCal:
         et = next(e for e in self.event_types if e["id"] == event_type_id)
         # Like cal.com: the title comes from the event type's name template.
         title = et["title"] if et.get("customName") == "{Event type title}" else f"{et['title']} between Founder and {attendee['name']}"
-        self.bookings[uid] = self._booking(uid, title, begin, attendee["name"], event_type={"id": et["id"], "slug": et.get("slug")})
+        # Like cal.com: the booking records how it was booked in bookingFieldsResponses.
+        where = location or {"type": "integration", "integration": "cal-video"}
+        detail = next((v for k, v in where.items() if k in ("address", "location", "phone")), "")
+        value = "integrations:daily" if where.get("integration") == "cal-video" else where.get("integration") or where["type"]
+        self.bookings[uid] = {
+            **self._booking(uid, title, begin, attendee["name"], event_type={"id": et["id"], "slug": et.get("slug")},
+                            email=attendee["email"], minutes=et.get("lengthInMinutes") or 30),
+            "guests": guests,
+            "bookingFieldsResponses": {"notes": notes, "location": {"value": value, "optionValue": detail}},
+        }
         return self.bookings[uid]
 
     async def reschedule_booking(self, uid, *, start, rescheduled_by=None, reason=None):

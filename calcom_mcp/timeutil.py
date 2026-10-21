@@ -22,6 +22,8 @@ def zone(tz: str) -> ZoneInfo:
 
 def parse_iso(value: str) -> datetime:
     """Parse cal.com timestamps ('2026-10-23T21:00:00.000Z', '...-07:00') into aware datetimes."""
+    if not isinstance(value, str):
+        raise TypeError(f"Expected an ISO timestamp, got {value!r}")
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 

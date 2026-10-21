@@ -212,11 +212,8 @@
   .picker .pday + .pday { margin-top: 14px; }
   .picker .eyebrow { color: var(--text-2); }
   .picker .ptimes { display: grid; grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); gap: 6px; margin-top: 8px; }
-  .picker button { height: 34px; border-radius: 300px; font-size: 13.5px; border: 1px solid var(--line); color: var(--text-2); transition: border-color .2s, background .2s, color .2s; }
-  .picker button.sug { border-color: var(--blue); color: var(--blue); font-weight: 500; }
-  .picker .note { margin: -2px 0 10px; font-size: 13px; color: var(--text-2); }
-  .picker .note b { color: var(--blue); font-weight: 500; }
-  .picker button:not(:disabled):hover { border-color: var(--blue); color: var(--blue); }
+  .picker button { height: 34px; border-radius: 300px; font-size: 13.5px; font-weight: 500; border: 1px solid var(--blue); color: var(--blue); transition: background .2s, color .2s; }
+  .picker button:not(:disabled):hover { background: var(--blue); color: #fff; }
   .picker button.on { background: var(--blue); border-color: var(--blue); color: #fff; }
   .picker button:disabled:not(.on) { opacity: .45; cursor: default; }
 
@@ -545,6 +542,7 @@ const ICON = {
 const KIND = {
   Book: { label: "New event", color: "var(--blue)", button: "Book it", style: "primary" },
   Reschedule: { label: "Reschedule", color: "var(--warn)", button: "Reschedule", style: "primary" },
+  Update: { label: "Update event", color: "var(--blue)", button: "Update", style: "primary" },
   Cancel: { label: "Cancel event", color: "var(--danger)", button: "Cancel event", style: "destructive" },
 };
 
@@ -557,9 +555,15 @@ let busy = false, started = false, agenda = [], profile = {};
 // ================= Header =================
 (function header() {
   const now = new Date();
-  const city = tz.split("/").pop().replace(/_/g, " ");
-  const abbr = new Intl.DateTimeFormat([], { timeZoneName: "short" }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value;
-  $("tz").textContent = abbr ? `${city} · ${abbr}` : city;
+  // Zone ids are named after one city ("America/Los_Angeles"), so prefer the region's name: "Pacific Time".
+  const zoneName = (style) => {
+    try { return new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: style }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value; }
+    catch { return undefined; }
+  };
+  const generic = zoneName("longGeneric");
+  const region = generic && !generic.startsWith("GMT") ? generic : tz.split("/").pop().replace(/_/g, " ");
+  const abbr = zoneName("short");
+  $("tz").textContent = abbr && abbr !== region ? `${region} · ${abbr}` : region;
   $("dow").textContent = now.toLocaleDateString([], { weekday: "long" });
   $("date").textContent = now.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
 })();
@@ -816,11 +820,9 @@ function timePicker(times) {
   box.className = "picker";
   const byDay = new Map();
   times.forEach((t) => byDay.set(t.day, [...(byDay.get(t.day) || []), t]));
-  const note = times.some((t) => t.suggested) && times.some((t) => !t.suggested)
-    ? `<div class="note"><b>Suggested</b> times are outlined; every open time is shown.</div>` : "";
-  box.innerHTML = note + [...byDay].map(([day, ts]) => `
+  box.innerHTML = [...byDay].map(([day, ts]) => `
     <div class="pday"><div class="eyebrow">${escapeHtml(day)} · ${ts.length} open</div>
-      <div class="ptimes">${ts.map((t) => `<button type="button" class="${t.suggested ? "sug" : ""}" data-pick="${escapeHtml(`${day}, ${t.time}`)}">${escapeHtml(t.time)}</button>`).join("")}</div>
+      <div class="ptimes">${ts.map((t) => `<button type="button" data-pick="${escapeHtml(`${day}, ${t.time}`)}">${escapeHtml(t.time)}</button>`).join("")}</div>
     </div>`).join("");
   box.querySelectorAll("[data-pick]").forEach((b) => (b.onclick = () => {
     if (busy) return;

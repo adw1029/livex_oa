@@ -164,6 +164,21 @@ def create_server(cal: Any) -> MCPServer:
             where[field] = detail.strip()
         return where
 
+    def same_location(et: dict[str, Any], response: Any) -> dict[str, Any] | None:
+        """The `location` that reproduces a booking's, from its bookingFieldsResponses.location; None = the default."""
+        if not isinstance(response, dict):
+            return None
+        options = location_options(et)
+        detail = (response.get("optionValue") or "").strip()
+        if detail:  # a place, link or phone the attendee supplied
+            kind = next((k for k in options if k in ATTENDEE_LOCATIONS), None)
+            return {"type": kind, ATTENDEE_LOCATIONS[kind]: detail} if kind else None
+        value = str(response.get("value") or "")
+        if value.startswith("integrations:"):  # e.g. integrations:daily is Cal Video
+            name = {"daily": "cal-video", "google:meet": "google-meet"}.get(value.removeprefix("integrations:"), value.removeprefix("integrations:"))
+            return {"type": "integration", "integration": name} if name in options else None
+        return {"type": value} if value in options else None
+
     async def drop_named_type(booking: dict[str, Any]) -> None:
         """Delete a named meeting's one-off event type once no upcoming meeting uses it."""
         et = booking.get("eventType") or {}
@@ -185,6 +200,24 @@ def create_server(cal: Any) -> MCPServer:
             booking_uid_to_reschedule=reschedule_uid,
         )
         return start in _slot_starts(slots)
+
+    async def book_named(base: dict[str, Any], title: str, length: int | None, begin: datetime, **booking: Any) -> Any:
+        """Book on a hidden one-off copy of `base` named `title`, so the booking carries that name."""
+        named = await call_cal(cal.create_event_type({
+            "title": (title.strip() or base.get("title") or "Meeting")[:100],
+            "slug": NAMED_SLUG_PREFIX + uuid.uuid4().hex[:10],
+            "lengthInMinutes": length or base.get("lengthInMinutes") or base.get("length"),
+            "hidden": True,
+            "description": f"Booked by LiveX.AI Assistant from \"{base.get('title')}\".",
+            "customName": "{Event type title}",  # the booking's title is exactly the name
+            **{k: base[k] for k in COPIED_SETTINGS if base.get(k) is not None},
+        }))
+        try:
+            return await call_cal(cal.create_booking(event_type_id=named["id"], start=tu.to_utc_z(begin), **booking))
+        except ToolError:
+            with contextlib.suppress(CalComError):
+                await cal.delete_event_type(named["id"])  # don't leave an unused one-off type behind
+            raise
 
     def parse_start(value: str) -> datetime:
         try:
@@ -362,32 +395,17 @@ def create_server(cal: Any) -> MCPServer:
         duration = await call_cal(duration_for(event_type_id, duration_minutes))
         if not allow_conflicts and not await call_cal(slot_is_open(event_type_id, begin, duration, None)):
             raise ToolError("That slot is no longer available. Call find_available_slots again and offer new times.")
-        base = await call_cal(event_type(event_type_id))
-        named = await call_cal(cal.create_event_type({
-            "title": (title.strip() or base.get("title") or "Meeting")[:100],
-            "slug": NAMED_SLUG_PREFIX + uuid.uuid4().hex[:10],
-            "lengthInMinutes": duration or base.get("lengthInMinutes") or base.get("length"),
-            "hidden": True,
-            "description": f"Booked by LiveX.AI Assistant from \"{base.get('title')}\".",
-            "customName": "{Event type title}",  # the booking's title is exactly the name
-            **{k: base[k] for k in COPIED_SETTINGS if base.get(k) is not None},
-        }))
-        try:
-            booking = await call_cal(
-                cal.create_booking(
-                    event_type_id=named["id"],
-                    start=tu.to_utc_z(begin),
-                    attendee={"name": attendee_name.strip(), "email": attendee_email.strip(), "timeZone": attendee_timezone},
-                    location=where,
-                    guests=guest_list or None,
-                    notes=notes,
-                    allow_conflicts=allow_conflicts,
-                )
-            )
-        except ToolError:
-            with contextlib.suppress(CalComError):
-                await cal.delete_event_type(named["id"])  # don't leave an unused one-off type behind
-            raise
+        booking = await book_named(
+            await call_cal(event_type(event_type_id)),
+            title,
+            duration,
+            begin,
+            attendee={"name": attendee_name.strip(), "email": attendee_email.strip(), "timeZone": attendee_timezone},
+            location=where,
+            guests=guest_list or None,
+            notes=notes,
+            allow_conflicts=allow_conflicts,
+        )
         # A recurring event type books a series and returns every occurrence.
         occurrences = booking if isinstance(booking, list) else [booking]
         result: dict[str, Any] = {"booked": compact_booking(occurrences[0], tz)}
@@ -422,6 +440,59 @@ def create_server(cal: Any) -> MCPServer:
             cal.reschedule_booking(booking_uid, start=tu.to_utc_z(begin), rescheduled_by=await host_email(), reason=reason)
         )
         return {"previous_uid": booking_uid, "rescheduled": compact_booking(moved, tz)}
+
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True))
+    async def update_booking(
+        booking_uid: str,
+        timezone: TzArg,
+        title: Annotated[str | None, Field(description="The meeting's new name. Omit to keep it.")] = None,
+        attendee_name: Annotated[str | None, Field(description="The attendee's corrected name. Omit to keep it.")] = None,
+        attendee_email: Annotated[str | None, Field(description="The attendee's corrected email. Omit to keep it.")] = None,
+    ) -> dict[str, Any]:
+        """Fix a meeting's name or its attendee's name/email. cal.com can't edit these, so this books an identical
+        meeting (same time, length, location, guests, notes) with the corrections, then cancels the original.
+        The attendee gets a cancellation and a new invite. Returns the NEW uid; use it for any follow-up."""
+        try:
+            tz = tu.zone(timezone)
+        except ValueError as e:
+            raise ToolError(str(e))
+        old = await call_cal(active_booking(booking_uid))
+        begin = tu.parse_iso(old["start"])
+        if begin <= datetime.now(UTC):
+            raise ToolError("That meeting has already started, so it can't be changed.")
+        attendee = (old.get("attendees") or [{}])[0]
+        name = (attendee_name or attendee.get("name") or "").strip()
+        email = (attendee_email or attendee.get("email") or "").strip()
+        if not name:
+            raise ToolError("attendee_name is required — ask the user who the meeting is with.")
+        if not EMAIL_RE.match(email):
+            raise ToolError(f"{email!r} doesn't look like an email — ask the user for it.")
+        if (title or old.get("title"), name, email) == (old.get("title"), attendee.get("name"), attendee.get("email")):
+            raise ToolError("Nothing to change: the name, attendee and email are already as given.")
+        event_type_id = (old.get("eventType") or {}).get("id") or old.get("eventTypeId")
+        if not event_type_id:
+            raise ToolError("This booking's event type no longer exists, so it can't be copied. Cancel it and book a new one.")
+        base = await call_cal(event_type(event_type_id))
+        responses = old.get("bookingFieldsResponses") or {}
+        new = await book_named(
+            base,
+            title or old.get("title") or "",
+            old.get("duration"),
+            begin,
+            attendee={"name": name, "email": email, "timeZone": attendee.get("timeZone") or timezone},
+            location=same_location(base, responses.get("location")),
+            guests=old.get("guests") or None,
+            notes=responses.get("notes"),
+            allow_conflicts=True,  # the original still holds this slot until it's cancelled below
+        )
+        new = new[0] if isinstance(new, list) else new
+        result = {"previous_uid": booking_uid, "updated": compact_booking(new, tz)}
+        try:
+            await cal.cancel_booking(booking_uid, reason="Replaced by a corrected booking.")
+        except CalComError as e:
+            return {**result, "warning": f"The corrected meeting is booked, but the original couldn't be cancelled ({e.message}). Cancel {booking_uid!r} separately."}
+        await drop_named_type(old)
+        return result
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True))
     async def cancel_booking(booking_uid: str, timezone: TzArg, reason: str | None = None) -> dict[str, Any]:

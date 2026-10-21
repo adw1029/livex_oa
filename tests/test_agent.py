@@ -51,7 +51,7 @@ def tool_results(message) -> dict[str, dict]:
 
 async def test_gate_set_comes_from_annotations(mcp):
     agent, _ = await make_agent(mcp)
-    assert agent.gated == {"create_booking", "reschedule_booking", "cancel_booking"}
+    assert agent.gated == {"create_booking", "reschedule_booking", "update_booking", "cancel_booking"}
 
 
 async def test_read_only_tools_run_immediately_and_meetings_become_cards(mcp, cal):
@@ -212,3 +212,32 @@ async def test_suggestions_across_days_show_without_full_day_table(mcp, cal):
     )
     turn = await agent.chat(Session("s", timezone=TZ), "this week?", TZ)
     assert [t["start"] for t in turn.times] == [tu.to_utc_z(thu), tu.to_utc_z(fri)]
+
+
+async def test_malformed_times_from_the_model_are_skipped(mcp, cal):
+    agent, _ = await make_agent(mcp, answer("Here you go.", times=[None, 42, "not a time"]))
+    turn = await agent.chat(Session("s", timezone=TZ), "anything open?", TZ)
+    assert turn.reply == "Here you go." and turn.times == []
+
+
+async def test_incomplete_change_goes_back_to_the_model_not_to_a_card(mcp, cal):
+    good = book_call(cal)
+    bad = call("create_booking", {**good.content[-1].input, "start": None}, call_id="tu_bad")
+    agent, llm = await make_agent(mcp, bad, good)
+    turn = await agent.chat(Session("s", timezone=TZ), "book Jordan at 2", TZ)
+    assert "missing start" in tool_results(llm.seen[1][-1])["tu_bad"]["content"]
+    assert turn.pending_action and turn.pending_action["items"][0]["title"] == "Intro call with Jordan"
+    assert not [c for c in cal.calls if c[0] == "create_booking"]
+
+
+async def test_update_card_shows_what_changes_and_writes_nothing_yet(mcp, cal):
+    uid = cal.seed("Intro with Sam", cal.at(15))
+    agent, _ = await make_agent(
+        mcp,
+        call("list_bookings", {"timezone": TZ, "date_from": cal.day.isoformat()}),
+        call("update_booking", {"booking_uid": uid, "timezone": TZ, "attendee_email": "sam@rivera.dev"}),
+    )
+    turn = await agent.chat(Session("s", timezone=TZ), "wrong email for Sam, it's sam@rivera.dev", TZ)
+    item = turn.pending_action["items"][0]
+    assert (item["action"], item["title"], item["detail"]) == ("Update", "Intro with Sam", "Email: sam@example.com → sam@rivera.dev")
+    assert not [c for c in cal.calls if c[0] in ("create_booking", "cancel_booking")]
