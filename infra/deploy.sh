@@ -9,7 +9,7 @@ PYTHON="${PYTHON:-.venv/bin/python}"
 
 # Linux arm64 wheels for the Lambda runtime, so this works from a Mac without Docker.
 rm -rf .build && mkdir -p .build/function
-"$PYTHON" -m pip install -q -r requirements.txt -t .build/function \
+"$PYTHON" -m pip install -q --group app -t .build/function \
   --platform manylinux2014_aarch64 --implementation cp --python-version 3.13 --only-binary=:all:
 cp -R app calcom_mcp infra/run.sh .build/function/
 find .build/function -name __pycache__ -prune -exec rm -rf {} +

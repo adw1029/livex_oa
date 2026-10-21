@@ -2,7 +2,8 @@
 
 install:  ## Create .venv and install app + dev dependencies
 	python3 -m venv .venv
-	.venv/bin/pip install -q -r requirements-dev.txt
+	.venv/bin/pip install -q --upgrade pip
+	.venv/bin/pip install -q --group dev
 
 run:      ## Start the app at http://localhost:8000 (reads .env)
 	.venv/bin/uvicorn app.main:app --reload --port 8000
