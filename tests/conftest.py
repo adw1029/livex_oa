@@ -1,3 +1,5 @@
+"""Run async tests on asyncio via the anyio pytest plugin."""
+
 import pytest
 
 

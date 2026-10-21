@@ -15,7 +15,7 @@ Resources:
   AppFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: .build/function
+      CodeUri: ../.build/function # built by deploy.sh
       Handler: run.sh
       Runtime: python3.13
       Architectures: [arm64]

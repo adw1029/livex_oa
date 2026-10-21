@@ -1,3 +1,5 @@
+"""Settings from the environment: `.env` locally, SSM Parameter Store on AWS."""
+
 from __future__ import annotations
 
 import os
