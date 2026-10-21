@@ -1,181 +1,126 @@
-# Initial fullstack plan — Cal.com chat assistant
+# Dev plan — Cal.com chat assistant (2-hour build)
 
-Python backend + React chat UI. Goal: the four assignment prompts work in the browser like a sharp EA. No AWS, Okta, MCP, or Jev in v1.
+A Python chatbot that lets a busy founder manage cal.com in plain language: **book, list, cancel, reschedule**, in a web UI.
+
+Scope rule: get the core experience working end to end first. MCP and AWS only go in where they cost almost nothing. Everything else goes in the README's "Production path" section.
 
 ## Stack
 
 | Piece | Choice |
 |---|---|
-| API | FastAPI, Python 3.12, `httpx`, Pydantic |
-| LLM | OpenAI or Anthropic **tool calling** (one provider) |
-| UI | Vite + React + TypeScript |
-| Secrets | `.env` — never in the client |
-| State | In-memory chat sessions (dict keyed by `session_id`) |
+| Server | FastAPI, Python 3.12, `httpx`, Pydantic, `uv` |
+| Tools | **MCP server** (official `mcp` 2.x SDK, `MCPServer`) wrapping the cal.com v2 API |
+| Agent | MCP client (stdio) + Claude via `anthropic` SDK tool use |
+| LLM provider | `LLM_PROVIDER=anthropic` (default) or `bedrock` (`AnthropicBedrock()`, IAM auth, same code) |
+| UI | Single `static/index.html` (vanilla JS) served by FastAPI, one port |
+| State | In-memory sessions + pending actions keyed by `session_id` |
+| Secrets | `.env` (never sent to the browser) |
 
-## Repo
+## Repo layout
 
 ```
 livex_oa/
-  backend/
-    app/
-      main.py          # FastAPI, CORS, static later
-      config.py        # env
-      calcom.py        # Cal.com v2 client
-      tools.py         # tool schemas + handlers
-      agent.py         # LLM loop + mutation guards
-      models.py        # chat request/response
-    requirements.txt
-  frontend/
-    src/
-      App.tsx
-      api.ts
-      components/Chat.tsx
-      components/Message.tsx
-      components/BookingCard.tsx
+  calcom_mcp/
+    client.py      # async cal.com v2 client, per-endpoint API versions
+    server.py      # FastMCP server: tools + guards + annotations
+  app/
+    main.py        # FastAPI: /api/chat, /api/confirm, static UI
+    agent.py       # LLM loop, MCP client, confirmation gate
+    timectx.py     # "now" + 7-day date table in user's timezone
+    static/index.html
+  tests/           # (if time) fake cal.com, confirmation-gate tests
   .env.example
   README.md
 ```
 
-Run: `uvicorn` on `:8000`, Vite on `:5173` proxying `/api`.
+## cal.com API (verified against docs)
 
-## Cal.com (do this before UI)
+Each endpoint has its own `cal-api-version`. Pin the version per method, not in one env var.
 
-### Account setup
+| Method | HTTP | `cal-api-version` |
+|---|---|---|
+| list event types | `GET /v2/event-types` | `2024-06-14` |
+| slots | `GET /v2/slots` | `2024-09-04` |
+| list bookings | `GET /v2/bookings` | `2026-05-01` |
+| create | `POST /v2/bookings` | `2026-02-25` |
+| reschedule | `POST /v2/bookings/{uid}/reschedule` | `2026-02-25` |
+| cancel | `POST /v2/bookings/{uid}/cancel` | `2026-02-25` |
 
-1. Cal.com account + API key (`Settings → Security`).
-2. One **30-min Intro** event type, timezone set (e.g. `America/Los_Angeles`).
-3. Seed 1–2 real bookings so list/cancel/reschedule aren’t empty.
+Gotchas:
+- Times go to cal.com in **UTC ISO 8601**. Do the timezone conversion in Python, never in the LLM.
+- Reschedule returns a **new booking uid**. Track it so "cancel that intro" still works afterward.
+- Pass `rescheduledBy=<host email>` so the rescheduled booking is auto-confirmed.
+- Use `bookingUidToReschedule` on slots so the original time still shows as free.
+- Create requires `attendee.name` + `attendee.timeZone`. Require the email too, so the invite actually reaches the attendee.
 
-### Client methods (`calcom.py`)
+## MCP tools
 
-| Method | HTTP |
+| Tool | Annotation | Notes |
+|---|---|---|
+| `list_event_types()` | read-only | picks the event type id |
+| `find_available_slots(event_type_id, date_from, timezone, date_to?, part_of_day?, after_time?, reschedule_booking_uid?)` | read-only | slots grouped by day, labeled in local time |
+| `list_bookings(timezone, date_from?, date_to?, status?)` | read-only | compact: uid, title, local start/end, attendee |
+| `create_booking(start, attendee_name, attendee_email, timezone)` | destructive | re-checks slot is free before posting |
+| `reschedule_booking(booking_uid, new_start, timezone)` | destructive | validates uid exists; returns new uid |
+| `cancel_booking(booking_uid, timezone, reason?)` | destructive | validates uid exists |
+
+`part_of_day` is mapped in code: morning 8–12, afternoon 12–17, evening 17–20.
+
+## Agent + confirmation gate
+
+1. Build the system prompt with the current time and a 7-day date table in the user's timezone, plus rules: ask only for missing details, offer 2–4 slots, never invent times or uids.
+2. Tool-use loop over the MCP tools (cap ~8 rounds).
+3. **If the model calls a `destructiveHint` tool, don't run it.** Store it as a pending action, return a summary ("Book Intro with Jordan Lee, Thu 2:00pm PT?"), and the UI shows **Confirm / Cancel** buttons.
+4. `POST /api/confirm/{action_id}` runs the stored call via MCP and feeds the result back to the model for a final reply.
+
+The gate is enforced in code from the tool annotations, not by the prompt. A write can't happen without a click.
+
+## API contract
+
+`POST /api/chat` `{session_id, message, timezone}` returns:
+```json
+{ "reply": "...", "suggestions": ["2:00pm", "3:30pm"], "pending_action": {"id": "...", "summary": "..."} | null }
+```
+`POST /api/confirm/{id}` `{session_id, approve: bool}` returns the same shape.
+
+## UI (single page)
+
+- Chat bubbles with light markdown, a typing indicator, and an error toast.
+- Suggestion chips (slot times) that send on click.
+- A confirmation card with Confirm/Cancel when `pending_action` is set.
+- Empty state: the four example prompts from the assignment.
+- Timezone from `Intl.DateTimeFormat().resolvedOptions().timeZone`, `session_id` in `sessionStorage`.
+
+## Timeline (~2h)
+
+| Time | Task |
 |---|---|
-| `list_event_types` | `GET /v2/event-types` |
-| `get_slots` | `GET /v2/slots` |
-| `list_bookings` | `GET /v2/bookings` |
-| `create_booking` | `POST /v2/bookings` |
-| `cancel_booking` | `POST /v2/bookings/{uid}/cancel` |
-| `reschedule_booking` | `POST /v2/bookings/{uid}/reschedule` |
+| 0:00–0:15 | cal.com account, API key, "30-min Intro" event type, 1–2 seed bookings, curl smoke test |
+| 0:15–0:45 | `calcom_mcp/` client + server; poke the tools with MCP Inspector |
+| 0:45–1:15 | Agent loop, time context, confirmation gate, `/api/chat` + `/api/confirm` |
+| 1:15–1:40 | `index.html` chat UI |
+| 1:40–2:00 | Run the demo script end to end, write the README |
 
-Headers: `Authorization: Bearer <key>`. Use the `cal-api-version` the docs require (bookings `2026-02-25`, slots `2024-09-04` unless you confirm otherwise).
-
-Prove with a `scripts/smoke.py` that prints event types, tomorrow’s slots, and existing bookings.
-
-## Backend contract
-
-`POST /api/chat`
-
-```json
-{
-  "session_id": "uuid",
-  "message": "book a 30-min intro Thursday afternoon",
-  "timezone": "America/Los_Angeles"
-}
-```
-
-Response (v1 can be non-streaming JSON; add SSE in P1):
-
-```json
-{
-  "reply": "I can do Thu 2:00, 3:30, or 4:00pm PT. Which works?",
-  "suggestions": ["Book 2:00pm", "Book 3:30pm", "Show Friday instead"]
-}
-```
-
-Optional later: `GET /api/health`.
-
-### Agent loop
-
-1. Append user message to session history.
-2. Call LLM with system prompt + tools.
-3. Execute tools → append results → repeat until a final text reply (cap ~8 rounds).
-4. Return assistant text + suggestion chips.
-
-### Tools the model gets
-
-- `list_event_types`
-- `get_slots(event_type_id, start, end, timezone, duration?, booking_uid_to_reschedule?)`
-- `list_bookings(after_start?, before_end?, status?)`
-- `create_booking(...)`
-- `cancel_booking(uid, reason?)`
-- `reschedule_booking(uid, start, timezone?)`
-
-### Guards in code (not another model)
-
-- Create/reschedule only if `start` was in the last `get_slots` result for that session (or re-fetch and check).
-- Cancel/reschedule only with a `bookingUid` that appeared in `list_bookings` this session (or re-fetch).
-- If attendee name/email missing → no create; model must ask.
-- Writes: model must confirm in chat (“Book X at Y?”) unless the user already said yes.
-
-### System prompt (short)
-
-You are the founder’s scheduler. Times in the user’s timezone. Ask only for missing details. Offer 2–4 slots, not a dump. Confirm before book/cancel/reschedule. Never invent times or uids.
-
-## Frontend
-
-One screen: transcript + composer.
-
-- Send `timezone` from `Intl.DateTimeFormat().resolvedOptions().timeZone`.
-- Persist `session_id` in `sessionStorage`.
-- User bubbles / assistant bubbles; markdown-light (bold, lists).
-- Loading state while `/api/chat` runs.
-- Suggestion chips under the last assistant message; click fills/sends.
-- Error toast if the API or Cal.com fails.
-- Empty state: four example prompts from the assignment.
-
-P1: booking cards (title, local time, attendee, link) if you later return structured `bookings[]` from the API. v1 text-only is enough if the copy is good.
-
-## Build order
-
-### Day 0 — setup (~1h)
-
-- Cal.com key + Intro event type
-- `.env.example`: `CAL_API_KEY`, `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, `CAL_API_VERSION`
-- FastAPI hello + React hello + CORS/proxy
-
-### Day 1 — Cal.com client
-
-- Implement six methods
-- `smoke.py` green
-- Handle Cal.com error bodies as readable strings
-
-### Day 2 — agent
-
-- Tool schemas + loop
-- Chat endpoint + in-memory sessions
-- Curl the four intents until they work without a UI
-
-### Day 3 — UI
-
-- Chat, timezone, chips, errors
-- Click through the four prompts in the browser
-
-### Day 4 — product polish (P1)
-
-- Slot wording + timezone labels
-- Stricter guards
-- Empty calendar / no slots / slot taken
-- README: run steps + demo script
-
-### Stretch (only if P0 is demo-ready)
-
-- SSE streaming
-- Booking cards
-- Serve `frontend/dist` from FastAPI (one-port demo)
+If time is left: pytest with a fake cal.com client covering "no write without confirm", "reschedule tracks new uid", and "slot taken → re-offer".
 
 ## Demo script
 
 1. `what's on my calendar tomorrow?`
-2. `book a 30-min intro with a candidate Thursday afternoon` → supply `Jordan Lee, jordan@example.com` when asked → pick a slot → confirm
-3. `move my 3pm to later today` (or the time you just booked)
-4. `cancel that intro`
+2. `book a 30-min intro with a candidate Thursday afternoon` → give `Jordan Lee, jordan@example.com` → pick a slot → **Confirm**
+3. `move it to later that day` → pick → **Confirm**
+4. `cancel that intro` → **Confirm**
 
-Record expected Cal.com side effects (event appears / moves / disappears).
+Check each step in the cal.com dashboard: the booking appears, moves, then is cancelled.
 
-## Out of scope for v1
+## README must include
 
-Auth, DB, AWS, Bedrock, MCP, Jev, calendar grid, email/Slack.
+- Setup: `uv sync`, `.env`, `uv run uvicorn app.main:app`, open `localhost:8000`.
+- **Design decisions:** the code-enforced confirmation gate, MCP as the tool boundary, timezone handling in Python, per-endpoint API versions.
+- **Use it from Claude Desktop:** an `mcpServers` config snippet pointing at `calcom_mcp/server.py`.
+- **Production path on AWS (not built):** Bedrock (already supported via flag), Lambda + Web Adapter with response streaming behind CloudFront, DynamoDB for sessions/pending actions/audit log, Secrets Manager, an auth gate on the URL, CDK in Python, GitHub Actions with OIDC deploys.
+- **Known limitations:** only shows cal.com bookings (not the connected Google Calendar), single user, in-memory state.
+- **With more time:** streaming responses, an eval suite of scripted conversations against a fake cal.com, React UI.
 
 ## Definition of done
 
-A reviewer clones, copies `.env`, runs backend + frontend, and those four chats work against a real Cal.com account. No terminal-only path required.
+A reviewer clones the repo, fills in `.env`, runs one command, opens the browser, and the four demo chats work against a real cal.com account. No action changes the calendar without an explicit Confirm click.

@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  LiveX.AI Assistant. CloudFront serves the UI from S3 and forwards /api/* to the
+  FastAPI app on Lambda. Secrets are SecureString parameters under SsmPrefix,
+  created outside this stack (CloudFormation can't create SecureStrings).
+
+Parameters:
+  SsmPrefix:
+    Type: String
+    Default: /livex-assistant
+
+Resources:
+  # ---------- API: FastAPI on Lambda (Lambda Web Adapter runs uvicorn as-is) ----------
+  AppFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .build/function
+      Handler: run.sh
+      Runtime: python3.13
+      Architectures: [arm64]
+      MemorySize: 1024
+      Timeout: 60
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerArm64:30
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_PORT: "8080"
+          AWS_LWA_READINESS_CHECK_PATH: /api/health
+          SSM_PREFIX: !Ref SsmPrefix
+          SESSIONS_TABLE: !Ref SessionsTable
+          LLM_PROVIDER: anthropic
+      FunctionUrlConfig:
+        AuthType: NONE # access is gated by the app's passcode check
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameters
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/*
+
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  # ---------- UI: private S3 bucket behind CloudFront ----------
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub ${WebBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+  WebOriginAccess:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-web
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: LiveX.AI Assistant
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: web
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOriginAccess.Id
+            S3OriginConfig: { OriginAccessIdentity: "" }
+          - Id: api
+            # https://<id>.lambda-url.<region>.on.aws/ -> <id>.lambda-url.<region>.on.aws
+            DomainName: !Select [2, !Split ["/", !GetAtt AppFunctionUrl.FunctionUrl]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginReadTimeout: 60 # a chat turn can take several model calls
+        DefaultCacheBehavior:
+          TargetOriginId: web
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+          Compress: true
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+
+Outputs:
+  Url:
+    Value: !Sub https://${Distribution.DomainName}
+  BucketName:
+    Value: !Ref WebBucket
+  DistributionId:
+    Value: !Ref Distribution
+  FunctionUrl:
+    Value: !GetAtt AppFunctionUrl.FunctionUrl

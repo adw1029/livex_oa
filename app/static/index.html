@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>LiveX.AI Assistant</title>
+<link rel="icon" type="image/png" href="logo.png">
+<link rel="apple-touch-icon" href="logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=Inter+Tight:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Theme follows livex.ai: ink + off-white, LiveX blue, Neue-Montreal-style grotesk, dot-matrix eyebrows, pill buttons. */
+  :root {
+    --ink: #050505;
+    --paper: #f7f7f7;
+    --surface: #ffffff;
+    --line: #e5e5e5;
+    --text: #050505;
+    --text-2: #787878;
+    --text-3: #a2a2a2;
+    --blue: #050dc8;
+    --blue-bright: #1f8fff;
+    --blue-soft: rgba(5, 13, 200, .07);
+    --danger: #d92d20;
+    --warn: #ff7a1a;
+    --ok: #12a150;
+    --side-bg: #050505;
+    --side-card: #111214;
+    --side-line: rgba(255, 255, 255, .12);
+    --side-text: #ffffff;
+    --side-text-2: rgba(255, 255, 255, .56);
+    --side-text-3: rgba(255, 255, 255, .32);
+    --font: "PP Neue Montreal", "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+    --dot: "Doto", ui-monospace, monospace;
+    --ease: cubic-bezier(.22, .8, .2, 1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0a0a0b;
+      --surface: #141416;
+      --line: rgba(255, 255, 255, .1);
+      --text: #f7f7f7;
+      --text-2: #9f9f9f;
+      --text-3: #5f5f62;
+      --blue: #3a45ff;
+      --blue-soft: rgba(31, 143, 255, .14);
+      --side-bg: #000000;
+      --side-card: #101012;
+    }
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--paper); color: var(--text);
+    font: 400 15px/1.45 var(--font); letter-spacing: -.005em;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  }
+  button { font: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--blue-bright); outline-offset: 3px; border-radius: 300px; }
+  svg { display: block; }
+  .eyebrow { font-family: var(--dot); font-weight: 700; font-size: 12.5px; line-height: 14px; text-transform: uppercase; letter-spacing: .06em; }
+  .app { height: 100%; display: grid; grid-template-columns: 360px 1fr; }
+
+  /* ================= Sidebar (ink) ================= */
+  .side { background: var(--side-bg); color: var(--side-text); display: flex; flex-direction: column; min-height: 0; }
+  .side-scroll { overflow-y: auto; flex: 1; padding: 28px 24px 16px; scrollbar-color: #333 transparent; }
+  .today .dow { color: var(--blue-bright); }
+  .today .date { font-size: 40px; font-weight: 400; letter-spacing: -.035em; line-height: 1.05; margin-top: 8px; }
+  .side-toggle { display: none; }
+
+  .next {
+    margin-top: 26px; padding: 18px 18px 18px; border-radius: 10px;
+    background: var(--side-card); border: 1px solid var(--side-line);
+    animation: rise .5s var(--ease) both;
+  }
+  .next .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .next .label { color: var(--side-text-2); }
+  .next .rel { font-family: var(--dot); font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--blue-bright); }
+  .next .rel.now { color: #3ddc84; display: flex; align-items: center; gap: 8px; }
+  .next .rel.now::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: blink 1.6s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .next .title { font-size: 22px; font-weight: 400; letter-spacing: -.025em; line-height: 1.15; margin-top: 14px; }
+  .next .meta { color: var(--side-text-2); margin-top: 6px; }
+  .next .join {
+    margin-top: 16px; display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 18px 0 5px;
+    border-radius: 300px; border: 1px solid rgba(255, 255, 255, .9); color: #fff; font-size: 15px; text-decoration: none;
+    transition: background .2s, color .2s;
+  }
+  .next .join .dotbtn { width: 30px; height: 30px; border-radius: 50%; background: #fff; color: var(--blue); display: grid; place-items: center; }
+  .next .join .dotbtn svg { width: 14px; height: 14px; }
+  .next .join:hover { background: #fff; color: var(--ink); }
+  .next.clear .title { font-size: 17px; color: var(--side-text-2); margin-top: 10px; }
+
+  .day-label { color: var(--side-text-2); margin: 30px 0 10px; }
+  .events { border-top: 1px solid var(--side-line); }
+  .ev {
+    position: relative; display: grid; grid-template-columns: 64px 1fr; gap: 14px; padding: 13px 0;
+    border-bottom: 1px solid var(--side-line); transition: background .2s;
+  }
+  .ev .t { font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.35; white-space: nowrap; color: var(--side-text); }
+  .ev .t span { display: block; color: var(--side-text-3); }
+  .ev .bar { display: none; }
+  .ev .body { min-width: 0; padding-left: 12px; border-left: 2px solid var(--blue-bright); }
+  .ev.pending .body { border-left-color: var(--warn); }
+  .ev .name { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ev .who { color: var(--side-text-2); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .ev.past { opacity: .38; }
+  .ev .acts {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; gap: 6px;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .ev:hover .acts, .ev:focus-within .acts, .ev.sel .acts { opacity: 1; pointer-events: auto; }
+  .ev:hover .body, .ev.sel .body { padding-right: 80px; }
+  .acts button {
+    width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+    border: 1px solid rgba(255, 255, 255, .35); color: #fff; background: var(--side-bg); transition: background .2s, color .2s, border-color .2s;
+  }
+  .acts button:hover { background: #fff; color: var(--ink); border-color: #fff; }
+  .acts button.x:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+  .acts svg { width: 14px; height: 14px; }
+
+  .side-note { padding: 22px 0 0; color: var(--side-text-2); }
+  .side-foot { padding: 14px 24px 18px; display: flex; align-items: center; gap: 6px; color: var(--side-text-2); border-top: 1px solid var(--side-line); }
+  .side-foot button { margin-left: auto; height: 28px; padding: 0 12px; border-radius: 300px; border: 1px solid var(--side-line); color: var(--side-text-2); font-size: 13px; }
+  .side-foot button:hover { color: #fff; border-color: rgba(255, 255, 255, .5); }
+
+  .skel { height: 54px; border-radius: 10px; margin-top: 12px; background: linear-gradient(90deg, #121214 0%, #1c1c20 50%, #121214 100%); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  /* ================= Chat (paper) ================= */
+  .chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .navbar {
+    display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 28px;
+    border-bottom: 1px solid var(--line); background: var(--paper);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .mark { width: 26px; height: 26px; flex: none; }
+  .brand strong { display: block; font-size: 17px; font-weight: 500; letter-spacing: -.02em; line-height: 1.1; }
+  .brand .eyebrow { display: block; color: var(--text-2); margin-top: 3px; font-size: 11px; }
+  .pill-btn {
+    margin-left: auto; height: 36px; padding: 0 16px; border-radius: 300px; border: 1px solid var(--text);
+    font-size: 14px; display: inline-flex; align-items: center; gap: 8px; transition: background .2s, color .2s;
+  }
+  .pill-btn svg { width: 15px; height: 15px; }
+  .pill-btn:hover { background: var(--text); color: var(--paper); }
+  .pill-btn + .pill-btn { margin-left: 8px; }
+  .pill-btn.quiet { border-color: var(--line); color: var(--text-2); }
+  .pill-btn.quiet:hover { border-color: var(--text); }
+  .pill-btn[hidden] { display: none; }
+
+  main { flex: 1; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+  .thread { width: 100%; max-width: 760px; margin: 0 auto; padding: 28px 28px 12px; display: flex; flex-direction: column; flex: 1; }
+
+  .welcome { margin: auto 0; padding: 24px 0 48px; animation: rise .7s var(--ease) both; }
+  .welcome .eyebrow { color: var(--blue); }
+  .welcome h1 { font-size: clamp(34px, 4.4vw, 52px); font-weight: 400; letter-spacing: -.04em; line-height: 1.02; margin: 14px 0 0; }
+  .welcome p { color: var(--text-2); font-size: 17px; margin: 14px 0 0; max-width: 520px; }
+
+  .stamp { align-self: center; color: var(--text-2); margin: 0 0 16px; }
+  .msg { max-width: min(78%, 560px); padding: 11px 16px 12px; border-radius: 10px; overflow-wrap: anywhere; margin-top: 12px; font-size: 15.5px; animation: rise .35s var(--ease) both; }
+  .msg.user { align-self: flex-end; background: var(--blue); color: #fff; }
+  .msg.bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); }
+  .msg.user + .msg.user, .msg.bot + .msg.bot { margin-top: 4px; }
+  .msg p { margin: 0 0 7px; } .msg p:last-child { margin: 0; }
+  .msg ul, .msg ol { margin: 2px 0 7px; padding-left: 20px; }
+  .msg li { margin: 3px 0; }
+  .msg strong { font-weight: 500; }
+  .msg.bot strong { color: var(--blue); }
+  @media (prefers-color-scheme: dark) { .msg.bot strong { color: var(--blue-bright); } }
+  .msg code { font: 13px ui-monospace, Menlo, monospace; background: var(--blue-soft); padding: 1px 5px; border-radius: 4px; }
+  .msg a { color: inherit; text-underline-offset: 3px; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+  .typing { align-self: flex-start; margin-top: 12px; padding: 14px 16px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); display: flex; gap: 5px; animation: rise .25s var(--ease) both; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); opacity: .3; animation: pulse 1.2s infinite ease-in-out; }
+  .typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes pulse { 0%, 70%, 100% { opacity: .25; } 35% { opacity: 1; } }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; animation: rise .35s var(--ease) both; }
+  .chip { height: 34px; padding: 0 15px; border-radius: 300px; font-size: 14px; border: 1px solid var(--blue); color: var(--blue); transition: background .2s, color .2s; }
+  .chip:hover { background: var(--blue); color: #fff; }
+  @media (prefers-color-scheme: dark) { .chip { border-color: var(--blue-bright); color: var(--blue-bright); } .chip:hover { background: var(--blue-bright); color: var(--ink); } }
+
+  .card { align-self: flex-start; width: min(100%, 420px); margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; animation: rise .4s var(--ease) both; }
+  .event { padding: 18px 20px 4px; }
+  .event + .event { border-top: 1px solid var(--line); padding-top: 16px; }
+  .event .bar { display: none; }
+  .event .kind { color: var(--accent); }
+  .event .name { font-size: 22px; font-weight: 400; letter-spacing: -.025em; line-height: 1.15; margin-top: 10px; }
+  .event .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-2); }
+  .event .row svg { width: 15px; height: 15px; flex: none; }
+  .event .row.when { color: var(--text); }
+  .actions { display: flex; gap: 8px; padding: 16px 20px 20px; }
+  .btn { flex: 1; height: 44px; border-radius: 300px; font-size: 15px; transition: background .2s, color .2s, border-color .2s, transform .12s; }
+  .btn:active { transform: scale(.98); }
+  .btn.secondary { border: 1px solid var(--text); }
+  .btn.secondary:hover { background: var(--text); color: var(--paper); }
+  .btn.primary { background: var(--blue); color: #fff; border: 1px solid var(--blue); }
+  .btn.primary:hover { filter: brightness(1.15); }
+  .btn.destructive { background: var(--danger); color: #fff; border: 1px solid var(--danger); }
+  .btn.destructive:hover { filter: brightness(1.1); }
+  .settled { display: none; align-items: center; gap: 8px; padding: 14px 20px 16px; margin-top: 14px; border-top: 1px solid var(--line); color: var(--text-2); }
+  .settled svg { width: 16px; height: 16px; }
+  .settled.ok { color: var(--ok); }
+  .card.done .actions { display: none; }
+  .card.done .settled { display: flex; }
+
+  /* ================= Composer ================= */
+  .composer { padding: 8px 28px max(22px, env(safe-area-inset-bottom)); }
+  .composer-inner { max-width: 760px; margin: 0 auto; }
+  .suggest { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .suggest:empty { display: none; }
+  .suggest button { height: 32px; padding: 0 14px; border-radius: 300px; font-size: 13px; color: var(--text-2); border: 1px solid var(--line); background: var(--surface); transition: color .2s, border-color .2s; }
+  .suggest button:hover { color: var(--text); border-color: var(--text); }
+  form {
+    display: flex; align-items: flex-end; gap: 10px; border: 1px solid var(--line); border-radius: 300px;
+    padding: 6px 6px 6px 22px; background: var(--surface); transition: border-color .2s;
+  }
+  form:focus-within { border-color: var(--text); }
+  textarea { flex: 1; border: 0; outline: none; resize: none; background: transparent; color: var(--text); font: inherit; font-size: 15.5px; padding: 9px 0; max-height: 140px; line-height: 1.35; }
+  textarea::placeholder { color: var(--text-3); }
+  .send { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--blue); color: #fff; transition: background .2s, transform .15s var(--ease); }
+  .send svg { width: 16px; height: 16px; }
+  .send:disabled { background: var(--line); color: var(--text-3); cursor: default; }
+  .send:not(:disabled):hover { transform: translateX(2px); }
+
+  .toast {
+    position: fixed; left: 50%; top: 76px; z-index: 20; transform: translate(-50%, -10px); opacity: 0; pointer-events: none;
+    display: flex; align-items: center; gap: 10px; max-width: calc(100% - 32px); padding: 11px 18px; border-radius: 300px;
+    font-size: 14px; color: #fff; background: var(--ink); border: 1px solid rgba(255, 255, 255, .14);
+    transition: opacity .25s, transform .35s var(--ease);
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast svg { width: 16px; height: 16px; color: #ff7a7a; flex: none; }
+
+  /* ================= Narrow screens ================= */
+  @media (max-width: 900px) {
+    .app { display: flex; flex-direction: column; }
+    .chat { display: contents; }
+    .navbar { order: 0; flex: none; height: 58px; padding: 0 16px; }
+    .pill-btn.quiet { padding: 0 11px; }
+    .pill-btn.quiet span { display: none; }
+    .side { order: 1; flex: none; max-height: 60vh; }
+    main { order: 2; min-height: 0; }
+    .composer { order: 3; padding: 8px 14px max(14px, env(safe-area-inset-bottom)); }
+    .side-scroll { padding: 14px 16px 12px; }
+    .today { display: none; }
+    .next { margin-top: 0; padding: 14px 16px; }
+    .next .title { font-size: 19px; margin-top: 8px; }
+    .side-toggle { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 12px 0 0; color: var(--side-text-2); }
+    .side-toggle svg { width: 12px; height: 12px; transition: transform .25s var(--ease); }
+    .side.open .side-toggle svg { transform: rotate(180deg); }
+    .side:not(.open) .list, .side:not(.open) .side-foot { display: none; }
+    .ev .acts { opacity: 1; pointer-events: auto; }
+    .ev .body { padding-right: 80px; }
+    .thread { padding: 20px 16px 10px; }
+    .msg { max-width: 86%; }
+    .suggest { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .suggest button { flex: none; }
+  }
+  /* ================= Passcode gate (hosted only) ================= */
+  .gate { position: fixed; inset: 0; z-index: 30; display: none; place-items: center; padding: 16px; background: var(--side-bg); }
+  .gate.show { display: grid; }
+  .gate form { width: min(380px, 100%); flex-direction: column; align-items: stretch; gap: 14px; padding: 28px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+  .gate img { align-self: flex-start; }
+  .gate h2 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.01em; }
+  .gate p { margin: 0; font-size: 14px; color: var(--text-2); }
+  .gate input { font: inherit; font-size: 15.5px; padding: 12px 16px; border-radius: 300px; border: 1px solid var(--line); background: transparent; color: var(--text); outline: none; }
+  .gate input:focus { border-color: var(--text); }
+  .gate button { padding: 12px 16px; border-radius: 300px; background: var(--blue); color: #fff; font: inherit; font-size: 15px; }
+  .gate .err { color: var(--danger); min-height: 1em; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side" aria-label="Upcoming meetings">
+    <div class="side-scroll">
+      <div class="today"><div class="dow eyebrow" id="dow"></div><div class="date" id="date"></div></div>
+      <div id="next"><div class="skel" style="height:96px;margin-top:18px"></div></div>
+      <div class="list" id="list"><div class="skel"></div><div class="skel"></div></div>
+      <button class="side-toggle" id="side-toggle" type="button" aria-expanded="false">
+        <span class="eyebrow" id="side-toggle-text">Show schedule</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+    </div>
+    <div class="side-foot"><span class="eyebrow" id="synced">Syncing…</span><button type="button" id="refresh">Refresh</button></div>
+  </aside>
+
+  <section class="chat">
+    <header class="navbar">
+      <div class="brand">
+        <img class="mark" src="logo.png" alt="" width="26" height="26">
+        <div><strong>LiveX.AI Assistant</strong><span class="eyebrow" id="tz"></span></div>
+      </div>
+      <button class="pill-btn" id="reset" type="button" aria-label="New conversation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat
+      </button>
+      <button class="pill-btn quiet" id="logout" type="button" aria-label="Log out" title="Log out" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10"/></svg><span>Log out</span>
+      </button>
+    </header>
+    <main id="scroll">
+      <div class="thread" id="thread">
+        <div class="welcome" id="welcome">
+          <div class="eyebrow">Scheduling on cal.com</div>
+          <h1 id="greeting">Hello.</h1>
+          <p id="welcome-sub">Book, move, or cancel meetings — just say it.</p>
+        </div>
+      </div>
+    </main>
+    <footer class="composer">
+      <div class="composer-inner">
+        <div class="suggest" id="suggest"></div>
+        <form id="composer">
+          <textarea id="input" rows="1" placeholder="Ask me to book, move, or cancel…" aria-label="Message" autofocus></textarea>
+          <button class="send" id="send" type="submit" aria-label="Send" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+          </button>
+        </form>
+      </div>
+    </footer>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1 5h2v7h-2Zm0 9h2v2h-2Z"/></svg>
+  <span id="toast-text"></span>
+</div>
+
+<div class="gate" id="gate">
+  <form id="gate-form" autocomplete="off">
+    <img src="logo.png" alt="" width="40" height="40">
+    <h2>LiveX.AI Assistant</h2>
+    <p>This demo manages a real cal.com calendar. Enter the access code to continue.</p>
+    <input id="gate-input" type="password" placeholder="Access code" aria-label="Access code" required>
+    <button type="submit">Continue</button>
+    <p class="err" id="gate-err"></p>
+  </form>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const thread = $("thread"), input = $("input"), sendBtn = $("send");
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+const fmtTime = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" });
+const fmtDay = new Intl.DateTimeFormat([], { weekday: "short", month: "short", day: "numeric" });
+const fmtWeekday = new Intl.DateTimeFormat([], { weekday: "short" });
+
+const ICON = {
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+  person: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+  note: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h9"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1.2 14.2-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4Z"/></svg>',
+  minus: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-5 9h10v2H7Z"/></svg>',
+  move: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h13M13 7l5 5-5 5"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>',
+  video: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h7A2.5 2.5 0 0 1 16 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 16.5Zm13 2.7 3.4-2.3a1 1 0 0 1 1.6.8v6.6a1 1 0 0 1-1.6.8L17 13.8Z"/></svg>',
+};
+const KIND = {
+  Book: { label: "New event", color: "var(--blue)", button: "Book it", style: "primary" },
+  Reschedule: { label: "Reschedule", color: "var(--warn)", button: "Reschedule", style: "primary" },
+  Cancel: { label: "Cancel event", color: "var(--danger)", button: "Cancel event", style: "destructive" },
+};
+
+function storage(fn, fallback) { try { return fn(); } catch { return fallback; } }
+function newId() { return crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2); }
+let sessionId = storage(() => sessionStorage.getItem("sid"), null) || newId();
+storage(() => sessionStorage.setItem("sid", sessionId));
+let busy = false, started = false, agenda = [], profile = {};
+
+// ================= Header =================
+(function header() {
+  const now = new Date();
+  const city = tz.split("/").pop().replace(/_/g, " ");
+  const abbr = new Intl.DateTimeFormat([], { timeZoneName: "short" }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value;
+  $("tz").textContent = abbr ? `${city} · ${abbr}` : city;
+  $("dow").textContent = now.toLocaleDateString([], { weekday: "long" });
+  $("date").textContent = now.toLocaleDateString([], { month: "long", day: "numeric" });
+})();
+function greet() {
+  const h = new Date().getHours();
+  const part = h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  const first = (profile.name || "").split(" ")[0];
+  $("greeting").textContent = first ? `${part}, ${first}.` : `${part}.`;
+}
+
+// ================= Agenda =================
+const dayKey = (d) => d.toLocaleDateString("en-CA");
+function dayLabel(d) {
+  const today = new Date(), tomorrow = new Date(Date.now() + 864e5);
+  if (dayKey(d) === dayKey(today)) return "Today";
+  if (dayKey(d) === dayKey(tomorrow)) return "Tomorrow";
+  return fmtDay.format(d);
+}
+function shortTitle(b) { return (b.title || "Meeting").split(" between ")[0]; }
+function who(b) {
+  const names = (b.attendees || []).map((a) => a.name || a.email).filter(Boolean);
+  return names.length ? names.join(", ") : "";
+}
+function relative(start, end) {
+  const now = Date.now();
+  if (start <= now && now < end) return { text: "Now", now: true };
+  const mins = Math.round((start - now) / 60000);
+  if (mins < 60) return { text: `in ${mins} min` };
+  if (dayKey(start) === dayKey(new Date())) { const h = Math.round(mins / 60); return { text: `in ${h} hr` }; }
+  return { text: `${dayLabel(start)}, ${fmtTime.format(start)}` };
+}
+function phrase(b) {
+  const s = new Date(b.start), day = dayLabel(s), time = fmtTime.format(s);
+  const when = day === "Today" ? `${time} meeting today` : day === "Tomorrow" ? `${time} meeting tomorrow` : `${fmtWeekday.format(s)} ${time} meeting`;
+  const name = who(b);
+  return { when, label: name ? `${when} with ${name}` : when };
+}
+
+async function loadAgenda() {
+  try {
+    const data = await api(`/api/agenda?timezone=${encodeURIComponent(tz)}&days=14`);
+    agenda = (data.bookings || []).filter((b) => b.status !== "cancelled").sort((a, b) => new Date(a.start) - new Date(b.start));
+    profile = data.profile || {};
+    drawAgenda();
+    $("synced").textContent = `Synced ${fmtTime.format(new Date())}`;
+  } catch (e) {
+    if (e.locked) return;
+    $("next").innerHTML = "";
+    $("list").innerHTML = `<div class="side-note">${escapeHtml(e.message)}</div>`;
+    $("synced").textContent = "Not synced";
+  }
+  greet(); suggest();
+}
+function upcoming() { const now = Date.now(); return agenda.filter((b) => new Date(b.end) > now); }
+
+function drawAgenda() {
+  const next = upcoming()[0];
+  if (next) {
+    const s = new Date(next.start), e = new Date(next.end), rel = relative(s, e);
+    const soon = s - Date.now() < 30 * 60000;
+    const link = /^https?:\/\//.test(next.location || "") && soon ? next.location : null;
+    $("next").innerHTML = `
+      <div class="next">
+        <div class="top"><span class="label eyebrow">Up next</span><span class="rel ${rel.now ? "now" : ""}">${escapeHtml(rel.text)}</span></div>
+        <div class="title">${escapeHtml(shortTitle(next))}</div>
+        <div class="meta">${escapeHtml(fmtTime.format(s))} – ${escapeHtml(fmtTime.format(e))}${who(next) ? " · " + escapeHtml(who(next)) : ""}</div>
+        ${link ? `<a class="join" href="${escapeHtml(link)}" target="_blank" rel="noopener"><span class="dotbtn">${ICON.video}</span>Join meeting</a>` : ""}
+      </div>`;
+  } else {
+    $("next").innerHTML = `<div class="next clear"><div class="top"><span class="label eyebrow">Up next</span></div><div class="title">Nothing scheduled for the next two weeks.</div></div>`;
+  }
+
+  const groups = new Map();
+  for (const b of agenda) {
+    const k = dayKey(new Date(b.start));
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(b);
+  }
+  const now = Date.now();
+  $("list").innerHTML = [...groups.values()].map((items) => `
+    <div class="day-label eyebrow">${escapeHtml(dayLabel(new Date(items[0].start)))}</div>
+    <div class="events">${items.map((b) => {
+      const s = new Date(b.start), e = new Date(b.end);
+      const past = e <= now;
+      return `<div class="ev ${past ? "past" : ""} ${b.status === "pending" ? "pending" : ""}" data-uid="${escapeHtml(b.uid)}" tabindex="0">
+        <div class="t">${escapeHtml(fmtTime.format(s))}<span>${escapeHtml(fmtTime.format(e))}</span></div>
+        <span class="bar"></span>
+        <div class="body"><div class="name">${escapeHtml(shortTitle(b))}</div><div class="who">${escapeHtml(who(b) || (b.status === "pending" ? "Awaiting confirmation" : ""))}</div></div>
+        ${past ? "" : `<div class="acts">
+          <button type="button" data-act="move" aria-label="Reschedule" title="Reschedule">${ICON.move}</button>
+          <button type="button" class="x" data-act="cancel" aria-label="Cancel" title="Cancel">${ICON.x}</button>
+        </div>`}
+      </div>`;
+    }).join("")}</div>`).join("");
+
+  $("list").querySelectorAll(".ev").forEach((row) => {
+    const b = agenda.find((x) => x.uid === row.dataset.uid);
+    row.onclick = (ev) => {
+      const act = ev.target.closest("[data-act]")?.dataset.act;
+      if (!act) { $("list").querySelectorAll(".ev.sel").forEach((r) => r !== row && r.classList.remove("sel")); row.classList.toggle("sel"); return; }
+      const p = phrase(b);
+      send(act === "move" ? `Move my ${p.label} to another time` : `Cancel my ${p.label}`);
+    };
+  });
+  const count = upcoming().length;
+  $("side-toggle-text").textContent = $("side").classList.contains("open") ? "Hide schedule" : count ? `Show schedule · ${count} upcoming` : "Show schedule";
+}
+
+function suggest() {
+  const box = $("suggest");
+  if (started) { box.innerHTML = ""; return; }
+  const next = upcoming()[0];
+  const ideas = ["What's on tomorrow?", "Book a 30-min meeting this week"];
+  if (next) ideas.unshift(`Move my ${phrase(next).when}`);
+  else ideas.push("Find an open hour Thursday");
+  box.innerHTML = ideas.map((t) => `<button type="button">${escapeHtml(t)}</button>`).join("");
+  box.querySelectorAll("button").forEach((b) => (b.onclick = () => send(b.textContent)));
+  $("welcome-sub").textContent = next
+    ? `Next up: ${shortTitle(next)}${who(next) ? " with " + who(next) : ""} · ${relative(new Date(next.start), new Date(next.end)).text}`
+    : "Book, move, or cancel meetings — just say it.";
+}
+
+// ================= Chat rendering =================
+function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function inline(s) {
+  return escapeHtml(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    .replace(/_\(([^)]+)\)_/g, "<em>($1)</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function markdown(text) {
+  const out = []; let list = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const bullet = line.match(/^\s*(?:[-*•]|\d+\.)\s+(.*)$/);
+    if (bullet) {
+      const tag = /^\s*\d+\./.test(line) ? "ol" : "ul";
+      if (!list || list.tag !== tag) { if (list) out.push(`</${list.tag}>`); list = { tag }; out.push(`<${tag}>`); }
+      out.push(`<li>${inline(bullet[1])}</li>`); continue;
+    }
+    if (list) { out.push(`</${list.tag}>`); list = null; }
+    if (line.trim()) out.push(`<p>${inline(line)}</p>`);
+  }
+  if (list) out.push(`</${list.tag}>`);
+  return out.join("");
+}
+function scrollDown() { const m = $("scroll"); m.scrollTo({ top: m.scrollHeight, behavior: "smooth" }); }
+function add(el) {
+  if (!started) {
+    started = true; $("welcome")?.remove(); suggest();
+    const stamp = document.createElement("div");
+    stamp.className = "stamp";
+    stamp.className = "stamp eyebrow"; stamp.textContent = `Today ${fmtTime.format(new Date())}`;
+    thread.appendChild(stamp);
+  }
+  thread.insertBefore(el, $("typing"));
+  scrollDown();
+  return el;
+}
+function bubble(role, text) {
+  const el = document.createElement("div");
+  el.className = `msg ${role}`;
+  el.innerHTML = role === "bot" ? markdown(text) : escapeHtml(text).replace(/\n/g, "<br>");
+  return add(el);
+}
+function clearChips() { thread.querySelectorAll(".chips").forEach((c) => c.remove()); }
+function chips(options) {
+  if (!options?.length) return;
+  const wrap = document.createElement("div");
+  wrap.className = "chips";
+  for (const o of options) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = o; b.onclick = () => send(o);
+    wrap.appendChild(b);
+  }
+  add(wrap);
+}
+function confirmCard(action) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const kinds = action.items.map((i) => KIND[i.action] || KIND.Book);
+  const primary = action.items.length === 1 ? kinds[0] : { button: "Confirm All", style: kinds.some((k) => k.style === "destructive") ? "destructive" : "primary" };
+  card.innerHTML = action.items.map((i, n) => `
+    <div class="event" style="--accent:${kinds[n].color}">
+      <span class="bar"></span>
+      <div>
+        <div class="kind eyebrow">${escapeHtml(kinds[n].label)}</div>
+        <div class="name">${escapeHtml((i.title || "Meeting").split(" between ")[0])}</div>
+        ${i.when ? `<div class="row when">${ICON.clock}<span>${escapeHtml(i.when)}</span></div>` : ""}
+        ${i.detail ? `<div class="row">${i.action === "Book" ? ICON.person : ICON.note}<span>${escapeHtml(i.detail)}</span></div>` : ""}
+      </div>
+    </div>`).join("") + `
+    <div class="actions">
+      <button type="button" class="btn secondary" data-ok="0">Not now</button>
+      <button type="button" class="btn ${primary.style}" data-ok="1">${escapeHtml(primary.button)}</button>
+    </div>
+    <div class="settled"></div>`;
+  card.querySelectorAll("[data-ok]").forEach((b) => (b.onclick = () => decide(card, action.id, b.dataset.ok === "1")));
+  return add(card);
+}
+function settle(card, ok, text) {
+  card.classList.add("done");
+  const s = card.querySelector(".settled");
+  s.className = `settled ${ok ? "ok" : ""}`;
+  s.innerHTML = `${ok ? ICON.check : ICON.minus}<span>${escapeHtml(text)}</span>`;
+}
+function typing(on) {
+  $("typing")?.remove();
+  if (!on) return;
+  const t = document.createElement("div");
+  t.id = "typing"; t.className = "typing"; t.setAttribute("aria-label", "Assistant is typing");
+  t.innerHTML = "<i></i><i></i><i></i>";
+  thread.appendChild(t); scrollDown();
+}
+function toast(msg) {
+  if (!msg) return;
+  $("toast-text").textContent = msg; $("toast").classList.add("show");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => $("toast").classList.remove("show"), 4500);
+}
+function setBusy(v) { busy = v; typing(v); refreshSend(); }
+function refreshSend() { sendBtn.disabled = busy || !input.value.trim(); }
+
+// ================= API =================
+let passcode = storage(() => localStorage.getItem("passcode"), "") || "";
+async function api(path, init = {}) {
+  const res = await fetch(path, { ...init, headers: { ...init.headers, "X-Passcode": encodeURIComponent(passcode) } });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    $("gate-err").textContent = passcode ? "That code didn't work." : "";
+    $("gate").classList.add("show"); $("gate-input").focus();
+    throw Object.assign(new Error(""), { locked: true });
+  }
+  if (!res.ok) throw new Error(data.detail || `Something went wrong (${res.status}).`);
+  return data;
+}
+function post(path, body) {
+  return api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+function render(turn) {
+  if (turn.reply) bubble("bot", turn.reply);
+  if (turn.pending_action) confirmCard(turn.pending_action);
+  chips(turn.suggestions);
+  if (turn.calendar_changed) loadAgenda();
+}
+async function send(text) {
+  text = (text ?? input.value).trim();
+  if (!text || busy) return;
+  input.value = ""; autosize(); clearChips();
+  thread.querySelectorAll(".card:not(.done)").forEach((c) => settle(c, false, "Answered in chat"));
+  bubble("user", text);
+  setBusy(true);
+  try { render(await post("/api/chat", { session_id: sessionId, message: text, timezone: tz })); }
+  catch (e) { toast(e.message); }
+  finally { setBusy(false); input.focus(); }
+}
+async function decide(card, actionId, approve) {
+  if (busy) return;
+  settle(card, approve, approve ? "Confirmed" : "Not changed");
+  clearChips(); setBusy(true);
+  try { render(await post("/api/confirm", { session_id: sessionId, action_id: actionId, approve })); }
+  catch (e) { toast(e.message); card.classList.remove("done"); }
+  finally { setBusy(false); input.focus(); }
+}
+
+// ================= Wiring =================
+function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; refreshSend(); }
+input.addEventListener("input", autosize);
+input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+$("composer").addEventListener("submit", (e) => { e.preventDefault(); send(); });
+$("refresh").onclick = loadAgenda;
+$("logout").hidden = !passcode;
+$("logout").onclick = async () => {
+  // Forget the server-side session too, so the next person on this browser starts clean.
+  await post("/api/reset", { session_id: sessionId }).catch(() => {});
+  storage(() => { localStorage.removeItem("passcode"); sessionStorage.removeItem("sid"); });
+  location.reload();
+};
+$("gate-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  passcode = $("gate-input").value.trim();
+  storage(() => localStorage.setItem("passcode", passcode));
+  $("gate").classList.remove("show");
+  $("logout").hidden = false;
+  loadAgenda();
+});
+$("side-toggle").onclick = () => {
+  const open = $("side").classList.toggle("open");
+  $("side-toggle").setAttribute("aria-expanded", String(open));
+  drawAgenda();
+};
+$("reset").onclick = async () => {
+  await post("/api/reset", { session_id: sessionId }).catch(() => {});
+  sessionId = newId(); storage(() => sessionStorage.setItem("sid", sessionId));
+  location.reload();
+};
+loadAgenda();
+setInterval(() => { if (agenda.length) { drawAgenda(); if (!started) suggest(); } }, 30000);   // keep "in N min" fresh
+setInterval(loadAgenda, 5 * 60000);                                                            // re-sync with cal.com
+</script>
+</body>
+</html>
