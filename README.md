@@ -11,11 +11,16 @@
 ## Highlights
 
 - **Plain-language scheduling.** Relative dates ("tomorrow", "Thursday afternoon", "later today") resolve in your
-  timezone. The assistant offers a few well-spread times as clickable chips and asks only for missing details.
+  timezone. For a vague request ("book a quick call with someone"), the assistant first asks for the day and length,
+  with tap-able options. Once those are known, it shows that day's open times with a few suggested.
 - **Nothing changes without a click.** Every create, reschedule and cancel shows a confirmation card first. Code
   enforces this, not the prompt.
-- **Your day at a glance.** A sidebar shows what's up next, with a countdown and a join link, and your next two weeks
-  of meetings, with one-click Move and Cancel.
+- **Smart view and Calendar.** A switch under the date flips between the two modes.
+  - **Smart view** (next to the chat): what's up next, with a countdown and a join link, and your next two weeks of
+    meetings, with one-click Move and Cancel.
+  - **Calendar:** a mini month with dots on busy days, and a full day, week or month calendar with a "now" line and
+    overlapping meetings side by side. Click a meeting for details, Join, Move or Cancel; click an empty time to start
+    a booking in the chat.
 - **MCP at the core.** The cal.com tools are a standalone [MCP](https://modelcontextprotocol.io) server. The web app is
   one client, and the same server works in Claude Desktop or Claude Code.
 - **Deployed on AWS.** CloudFront, S3, Lambda, DynamoDB and SSM Parameter Store, all pay-per-request.
@@ -51,10 +56,10 @@ cal.com v2 API
 | MCP tool | Purpose | Gated? |
 |---|---|---|
 | `get_profile` | Owner's name, email, timezone | no |
-| `list_event_types` | Bookable event types (id, title, length) | no |
+| `list_event_types` | Bookable event types: length options and allowed locations | no |
 | `find_available_slots` | Open times for a local date range, part of day, or "after 3pm" | no |
-| `list_bookings` | Meetings in a date range, in the user's timezone | no |
-| `create_booking` | Book a meeting with an attendee | **yes** |
+| `list_bookings` | Meetings by date range, status, attendee name or email, or event type | no |
+| `create_booking` | Book a meeting: attendee, guests, length, location; can double-book on request | **yes** |
 | `reschedule_booking` | Move a booking (cal.com issues a new uid) | **yes** |
 | `cancel_booking` | Cancel a booking | **yes** |
 
@@ -72,7 +77,7 @@ make run                # http://localhost:8000
 Create the cal.com key under *Settings → Security → API keys* (live keys start with `cal_live_`).
 
 ```bash
-make test               # 20 tests, no network or API keys needed
+make test               # 29 tests, no network or API keys needed
 ```
 
 ## Design decisions
@@ -103,10 +108,35 @@ to booking unchanged. See `calcom_mcp/timeutil.py`.
 - **Reschedules:** they pass `rescheduledBy=<host email>`, so the moved booking is auto-confirmed. The new uid cal.com
   issues is returned to the model, so "cancel that intro" still works after a move.
 - **Cancellations:** cal.com requires a reason when the host cancels, so the server supplies a default.
+- **Meeting names:** a booking's title can't be set or changed through the API, because cal.com derives it from the
+  event type. So each meeting is booked on a hidden one-off event type named after it ("Investor sync", or a name
+  Claude picks, like "Intro call with Andy"), with a name template of just `{Event type title}`. It copies the
+  original type's length, locations and schedule. The one-off type is deleted if the booking fails, or once its
+  meeting is cancelled, and it never shows up as a bookable type.
+- **Stale uids:** a rescheduled booking keeps a `rescheduledToUid`. If the model acts on the old uid, the server's
+  error names the new one, so the model can recover.
+- **Durations:** `lengthInMinutes` is only accepted for event types with `lengthInMinutesOptions`. The slots API
+  returns slots of any `duration`, even for fixed-length types, and booking one of them then fails. So the server
+  checks the length against the event type first. For any length on request, give one event type several durations
+  (e.g. a hidden "Flexible meeting").
+- **Locations:** a booking's `location` must be one of the event type's own locations. The server lists those
+  options and validates against them, and it explains when a new kind of place (e.g. "custom attendee location")
+  must first be added to the event type in cal.com.
+- **Host overrides:** "book it anyway" sets `allowConflicts`. The confirmation card warns that the booking
+  overlaps another meeting.
+- **Recurring event types:** booking one returns every occurrence (cal.com returns a list).
+- **Bookings list:** the server follows cursor pagination (`pagination.nextCursor`), so long ranges aren't cut off
+  at 100. It also exposes the `attendeeEmail`, `eventTypeId` and `status` filters, and returns notes, cancellation
+  reasons and reschedule links.
 
-**5. UX for someone who lives in their inbox.**
-The assistant offers 2–4 options rather than a full list, uses clickable reply chips, asks for missing details in
-one message, and shows times in your timezone with the zone abbreviation.
+**5. Structured replies, rendered by the app.**
+The model's final answer uses Claude's structured outputs (a JSON schema): a one- or two-sentence `message`, the
+`times` it suggests, the `meetings` it refers to, and up to three tap-able `replies`. The app renders a picker with
+every open time on the suggested days (the suggestions outlined), and meetings as cards with a Join link, so
+formatting stays consistent and the model can't ramble.
+The server keeps only times that cal.com actually returned and meetings it actually fetched, so a hallucinated slot
+can't reach the screen. If the model repeats an identical lookup within one request, the server returns "already
+fetched" instead of looping. If it runs out of tool rounds, it is asked to answer from what it already has.
 
 ## Deployment on AWS
 

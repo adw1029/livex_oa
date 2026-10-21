@@ -10,8 +10,10 @@ Run standalone:  python -m calcom_mcp.server   (stdio transport)
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
@@ -24,9 +26,18 @@ from pydantic import Field
 from calcom_mcp import timeutil as tu
 from calcom_mcp.client import CalClient, CalComError
 
-MAX_SLOTS_PER_DAY = 12
+MAX_SLOTS_PER_DAY = 48  # a whole day at 30-minute steps
 MAX_DAYS = 7
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# cal.com can't name a single booking: its title comes from the event type. So each named meeting is booked on a
+# hidden one-off event type with that title; these are tagged by slug and hidden from list_event_types.
+NAMED_SLUG_PREFIX = "lx-meeting-"
+# Settings copied from the event type the user picked, so the one-off type books exactly like it.
+COPIED_SETTINGS = ("locations", "scheduleId", "minimumBookingNotice", "beforeEventBuffer", "afterEventBuffer", "slotInterval")
+
+# Attendee-supplied location types and the field that carries the attendee's value.
+ATTENDEE_LOCATIONS = {"attendeeAddress": "address", "attendeeDefined": "location", "attendeePhone": "phone"}
 
 TzArg = Annotated[str, Field(description="User's IANA timezone, e.g. 'America/Los_Angeles'.")]
 DateArg = Annotated[str, Field(description="Local date, YYYY-MM-DD.")]
@@ -46,7 +57,31 @@ def compact_booking(b: dict[str, Any], tz: Any) -> dict[str, Any]:
         "event_type_id": event_type.get("id") or b.get("eventTypeId"),
         "attendees": [{"name": a.get("name"), "email": a.get("email")} for a in b.get("attendees") or []],
         "location": b.get("location") or b.get("meetingUrl"),
+        **{
+            k: v
+            for k, v in {
+                "guests": b.get("guests"),
+                "notes": (b.get("bookingFieldsResponses") or {}).get("notes"),
+                "cancellation_reason": b.get("cancellationReason"),
+                "rescheduled_to_uid": b.get("rescheduledToUid"),
+            }.items()
+            if v
+        },
     }
+
+
+def location_options(et: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Where an event type can be held: option name (e.g. "zoom", "address", "attendeeDefined") -> its location.
+
+    cal.com only accepts one of the event type's own locations. `address`/`link`/`phone` mean the
+    organizer's configured value; the attendee* types carry a value supplied at booking time.
+    """
+    options: dict[str, dict[str, Any]] = {}
+    for loc in et.get("locations") or []:
+        key = loc.get("integration") if loc.get("type") == "integration" else loc.get("type")
+        if key:
+            options[key] = loc
+    return options
 
 
 def _slot_starts(slots_by_day: dict[str, list[Any]]) -> list[datetime]:
@@ -69,6 +104,7 @@ def create_server(cal: Any) -> MCPServer:
         ),
     )
     host: dict[str, Any] = {}
+    event_types: dict[int, dict[str, Any]] = {}
 
     async def host_email() -> str | None:
         if "email" not in host:
@@ -83,17 +119,69 @@ def create_server(cal: Any) -> MCPServer:
         booking = next((b for b in found if b.get("uid") == uid), None)
         if not booking:
             raise ToolError(f"No booking with uid {uid!r}. Call list_bookings to find the right one.")
+        if booking.get("rescheduledToUid"):
+            raise ToolError(f"Booking {uid!r} was rescheduled; it is now booking {booking['rescheduledToUid']!r}.")
         if booking.get("status") in ("cancelled", "rejected"):
             raise ToolError(f"Booking {uid!r} is already {booking['status']}.")
         return booking
 
-    async def slot_is_open(event_type_id: int, start: datetime, reschedule_uid: str | None) -> bool:
+    async def event_type(event_type_id: int) -> dict[str, Any]:
+        if event_type_id not in event_types:
+            event_types.update({et["id"]: et for et in await cal.list_event_types()})
+        if event_type_id not in event_types:
+            raise ToolError(f"No event type {event_type_id}. Call list_event_types to pick one.")
+        return event_types[event_type_id]
+
+    async def duration_for(event_type_id: int, minutes: int | None) -> int | None:
+        """The `duration` to send cal.com: only allowed for event types that offer several lengths."""
+        if minutes is None:
+            return None
+        et = await event_type(event_type_id)
+        options = et.get("lengthInMinutesOptions") or []
+        if options:
+            if minutes not in options:
+                raise ToolError(f"{et.get('title')} can be {', '.join(map(str, options))} minutes, not {minutes}.")
+            return minutes
+        length = et.get("lengthInMinutes") or et.get("length")
+        if minutes != length:
+            raise ToolError(f"{et.get('title')} is always {length} minutes. Pick an event type with that length.")
+        return None  # fixed length: cal.com rejects an explicit duration
+
+    async def booking_location(event_type_id: int, option: str | None, detail: str | None) -> dict[str, Any] | None:
+        """The `location` object for a booking, checked against what the event type allows."""
+        if not option:
+            return None
+        et = await event_type(event_type_id)
+        options = location_options(et)
+        if option not in options:
+            allowed = ", ".join(options) or "its default location only"
+            raise ToolError(f"{et.get('title')} can be held at: {allowed}. A new kind of place has to be added to the event type in cal.com first.")
+        loc = options[option]
+        where = {"type": "integration", "integration": option} if loc["type"] == "integration" else {"type": loc["type"]}
+        if field := ATTENDEE_LOCATIONS.get(where["type"]):
+            if not (detail or "").strip():
+                raise ToolError(f"Ask the user for the {field} to use.")
+            where[field] = detail.strip()
+        return where
+
+    async def drop_named_type(booking: dict[str, Any]) -> None:
+        """Delete a named meeting's one-off event type once no upcoming meeting uses it."""
+        et = booking.get("eventType") or {}
+        if not str(et.get("slug") or "").startswith(NAMED_SLUG_PREFIX):
+            return
+        with contextlib.suppress(CalComError):
+            if not await cal.list_bookings(event_type_id=et["id"], status="upcoming"):
+                await cal.delete_event_type(et["id"])
+                event_types.pop(et["id"], None)
+
+    async def slot_is_open(event_type_id: int, start: datetime, duration: int | None, reschedule_uid: str | None) -> bool:
         # cal.com only returns slots that fit entirely inside the window, so give it room for the meeting.
         slots = await cal.get_slots(
             event_type_id=event_type_id,
             start=tu.to_utc_z(start - timedelta(minutes=1)),
             end=tu.to_utc_z(start + timedelta(days=1)),
             time_zone="UTC",
+            duration=duration,
             booking_uid_to_reschedule=reschedule_uid,
         )
         return start in _slot_starts(slots)
@@ -130,9 +218,15 @@ def create_server(cal: Any) -> MCPServer:
                     "title": et.get("title"),
                     "slug": et.get("slug"),
                     "length_minutes": et.get("lengthInMinutes") or et.get("length"),
+                    "duration_options": et.get("lengthInMinutesOptions") or [],
+                    "location_options": [
+                        {"option": key, "value": loc.get("address") or loc.get("link") or loc.get("phone")}
+                        for key, loc in location_options(et).items()
+                    ],
                     "hidden": bool(et.get("hidden")),
                 }
                 for et in event_types
+                if not str(et.get("slug") or "").startswith(NAMED_SLUG_PREFIX)
             ]
         }
 
@@ -144,6 +238,7 @@ def create_server(cal: Any) -> MCPServer:
         date_to: Annotated[str | None, Field(description="Last local date to search (inclusive). Defaults to date_from.")] = None,
         part_of_day: Literal["morning", "afternoon", "evening", "any"] = "any",
         after_time: Annotated[str | None, Field(description="Only slots at/after this local time, HH:MM (e.g. for 'later today').")] = None,
+        duration_minutes: Annotated[int | None, Field(description="Only for event types with duration_options.")] = None,
         reschedule_booking_uid: Annotated[str | None, Field(description="When rescheduling, the booking being moved (its own slot counts as free).")] = None,
     ) -> dict[str, Any]:
         """Find open times for an event type within a local date range. Returns slots grouped by day,
@@ -162,6 +257,7 @@ def create_server(cal: Any) -> MCPServer:
         start = max(start, datetime.now(tz).replace(second=0, microsecond=0))
         if start >= end:
             return {"timezone": timezone, "days": [], "note": "That date range is already in the past."}
+        duration = await call_cal(duration_for(event_type_id, duration_minutes))
 
         slots = await call_cal(
             cal.get_slots(
@@ -169,6 +265,7 @@ def create_server(cal: Any) -> MCPServer:
                 start=tu.to_utc_z(start),
                 end=tu.to_utc_z(end),
                 time_zone=timezone,
+                duration=duration,
                 booking_uid_to_reschedule=reschedule_booking_uid,
             )
         )
@@ -202,10 +299,12 @@ def create_server(cal: Any) -> MCPServer:
         date_from: Annotated[str | None, Field(description="First local date, YYYY-MM-DD.")] = None,
         date_to: Annotated[str | None, Field(description="Last local date (inclusive). Defaults to date_from.")] = None,
         status: Annotated[
-            Literal["upcoming", "past", "cancelled", "unconfirmed"] | None,
+            Literal["upcoming", "recurring", "past", "cancelled", "unconfirmed"] | None,
             Field(description="Omit for all active (non-cancelled) bookings in the date range; defaults to upcoming when no dates are given."),
         ] = None,
         attendee_name: str | None = None,
+        attendee_email: str | None = None,
+        event_type_id: Annotated[int | None, Field(description="Only bookings of this event type, e.g. all intro calls.")] = None,
     ) -> dict[str, Any]:
         """List the user's bookings, sorted by start time, with times in the user's timezone."""
         try:
@@ -221,7 +320,10 @@ def create_server(cal: Any) -> MCPServer:
         if status is None and not date_from:
             status = "upcoming"
         bookings = await call_cal(
-            cal.list_bookings(status=status, after_start=after, before_end=before, attendee_name=attendee_name)
+            cal.list_bookings(
+                status=status, after_start=after, before_end=before, attendee_name=attendee_name,
+                attendee_email=attendee_email, event_type_id=event_type_id,
+            )
         )
         if status is None:
             bookings = [b for b in bookings if b.get("status") not in ("cancelled", "rejected")]
@@ -232,12 +334,18 @@ def create_server(cal: Any) -> MCPServer:
     async def create_booking(
         event_type_id: int,
         start: Annotated[str, Field(description="Slot `start` from find_available_slots (UTC ISO 8601).")],
+        title: Annotated[str, Field(description="The meeting's name: the user's, or a short one from the conversation, e.g. 'Intro call with Andy'.")],
         attendee_name: str,
         attendee_email: str,
         attendee_timezone: Annotated[str, Field(description="Attendee's IANA timezone; use the user's if unknown.")],
+        duration_minutes: Annotated[int | None, Field(description="Only for event types with duration_options.")] = None,
+        location: Annotated[str | None, Field(description="One of the event type's location_options. Omit for its default.")] = None,
+        location_detail: Annotated[str | None, Field(description="The place, link or phone number, for attendeeAddress / attendeeDefined / attendeePhone.")] = None,
+        guests: Annotated[list[str] | None, Field(description="Extra guest emails to invite.")] = None,
         notes: str | None = None,
+        allow_conflicts: Annotated[bool, Field(description="Book even though the user is busy then. Only when the user explicitly asks to double-book.")] = False,
     ) -> dict[str, Any]:
-        """Book a meeting with an attendee. The slot is re-checked against live availability first."""
+        """Book a meeting with an attendee, under the given name. The slot is re-checked against live availability first."""
         if not attendee_name.strip():
             raise ToolError("attendee_name is required — ask the user who the meeting is with.")
         if not EMAIL_RE.match(attendee_email.strip()):
@@ -246,18 +354,46 @@ def create_server(cal: Any) -> MCPServer:
             tz = tu.zone(attendee_timezone)
         except ValueError as e:
             raise ToolError(str(e))
+        guest_list = [g.strip() for g in guests or [] if g.strip()]
+        if bad := [g for g in guest_list if not EMAIL_RE.match(g)]:
+            raise ToolError(f"These guest emails don't look valid: {', '.join(bad)}. Ask the user to check them.")
+        where = await call_cal(booking_location(event_type_id, location, location_detail))
         begin = parse_start(start)
-        if not await call_cal(slot_is_open(event_type_id, begin, None)):
+        duration = await call_cal(duration_for(event_type_id, duration_minutes))
+        if not allow_conflicts and not await call_cal(slot_is_open(event_type_id, begin, duration, None)):
             raise ToolError("That slot is no longer available. Call find_available_slots again and offer new times.")
-        booking = await call_cal(
-            cal.create_booking(
-                event_type_id=event_type_id,
-                start=tu.to_utc_z(begin),
-                attendee={"name": attendee_name.strip(), "email": attendee_email.strip(), "timeZone": attendee_timezone},
-                notes=notes,
+        base = await call_cal(event_type(event_type_id))
+        named = await call_cal(cal.create_event_type({
+            "title": (title.strip() or base.get("title") or "Meeting")[:100],
+            "slug": NAMED_SLUG_PREFIX + uuid.uuid4().hex[:10],
+            "lengthInMinutes": duration or base.get("lengthInMinutes") or base.get("length"),
+            "hidden": True,
+            "description": f"Booked by LiveX.AI Assistant from \"{base.get('title')}\".",
+            "customName": "{Event type title}",  # the booking's title is exactly the name
+            **{k: base[k] for k in COPIED_SETTINGS if base.get(k) is not None},
+        }))
+        try:
+            booking = await call_cal(
+                cal.create_booking(
+                    event_type_id=named["id"],
+                    start=tu.to_utc_z(begin),
+                    attendee={"name": attendee_name.strip(), "email": attendee_email.strip(), "timeZone": attendee_timezone},
+                    location=where,
+                    guests=guest_list or None,
+                    notes=notes,
+                    allow_conflicts=allow_conflicts,
+                )
             )
-        )
-        return {"booked": compact_booking(booking, tz)}
+        except ToolError:
+            with contextlib.suppress(CalComError):
+                await cal.delete_event_type(named["id"])  # don't leave an unused one-off type behind
+            raise
+        # A recurring event type books a series and returns every occurrence.
+        occurrences = booking if isinstance(booking, list) else [booking]
+        result: dict[str, Any] = {"booked": compact_booking(occurrences[0], tz)}
+        if len(occurrences) > 1:
+            result["occurrences"] = [compact_booking(b, tz)["when"] for b in occurrences]
+        return result
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True))
     async def reschedule_booking(
@@ -274,7 +410,13 @@ def create_server(cal: Any) -> MCPServer:
         booking = await call_cal(active_booking(booking_uid))
         begin = parse_start(new_start)
         event_type_id = (booking.get("eventType") or {}).get("id") or booking.get("eventTypeId")
-        if event_type_id and not await call_cal(slot_is_open(event_type_id, begin, booking_uid)):
+        duration = None
+        if event_type_id:
+            # Keep the booking's own length when its event type offers several.
+            options = (await call_cal(event_type(event_type_id))).get("lengthInMinutesOptions") or []
+            if booking.get("duration") in options:
+                duration = booking["duration"]
+        if event_type_id and not await call_cal(slot_is_open(event_type_id, begin, duration, booking_uid)):
             raise ToolError("That time isn't available. Call find_available_slots with reschedule_booking_uid and offer new times.")
         moved = await call_cal(
             cal.reschedule_booking(booking_uid, start=tu.to_utc_z(begin), rescheduled_by=await host_email(), reason=reason)
@@ -291,6 +433,7 @@ def create_server(cal: Any) -> MCPServer:
         booking = await call_cal(active_booking(booking_uid))
         # cal.com requires a reason when the host cancels; don't make the user invent one.
         await call_cal(cal.cancel_booking(booking_uid, reason=reason or "Cancelled by the host."))
+        await drop_named_type(booking)
         return {"cancelled": {**compact_booking(booking, tz), "status": "cancelled"}}
 
     return server

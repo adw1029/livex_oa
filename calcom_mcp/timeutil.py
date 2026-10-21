@@ -43,7 +43,8 @@ def local_day_bounds(day_from: date, day_to: date, tz: ZoneInfo) -> tuple[dateti
     return start, end
 
 
-def _clock(dt: datetime) -> str:
+def fmt_time(dt: datetime) -> str:
+    """'2:00 PM'"""
     hour = dt.hour % 12 or 12
     suffix = "AM" if dt.hour < 12 else "PM"
     return f"{hour}:{dt.minute:02d} {suffix}"
@@ -56,16 +57,16 @@ def fmt_day(dt: datetime | date) -> str:
 def fmt_local(dt: datetime, tz: ZoneInfo) -> str:
     """'Thu Oct 23, 2:00 PM'"""
     local = dt.astimezone(tz)
-    return f"{fmt_day(local)}, {_clock(local)}"
+    return f"{fmt_day(local)}, {fmt_time(local)}"
 
 
 def fmt_range(start: datetime, end: datetime, tz: ZoneInfo) -> str:
     """'Thu Oct 23, 2:00–2:30 PM PDT'"""
     s, e = start.astimezone(tz), end.astimezone(tz)
-    first = _clock(s)
+    first = fmt_time(s)
     if (s.hour < 12) == (e.hour < 12):
         first = first[:-3]  # "2:00–2:30 PM", not "2:00 PM–2:30 PM"
-    return f"{fmt_day(s)}, {first}–{_clock(e)} {e.tzname()}"
+    return f"{fmt_day(s)}, {first}–{fmt_time(e)} {e.tzname()}"
 
 
 def time_context(tz_name: str, now: datetime | None = None, days: int = 14) -> str:
@@ -79,6 +80,6 @@ def time_context(tz_name: str, now: datetime | None = None, days: int = 14) -> s
         rows.append(f"{d.isoformat()} {d.strftime('%a')}{tag}")
     return (
         f"User timezone: {tz_name} ({now.tzname()})\n"
-        f"Now: {fmt_day(now)} {now.year}, {_clock(now)} (local time {now.strftime('%H:%M')})\n"
+        f"Now: {fmt_day(now)} {now.year}, {fmt_time(now)} (local time {now.strftime('%H:%M')})\n"
         f"Next {days} days: " + " | ".join(rows)
     )

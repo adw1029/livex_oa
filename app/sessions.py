@@ -37,6 +37,8 @@ def dump(session: Session) -> bytes:
         "pending": pending,
         "bookings": session.bookings,
         "event_types": session.event_types,
+        "slots": sorted(session.slots),
+        "offered": session.offered,
     }
     # Compressed: tool results (slots, bookings) repeat a lot, and DynamoDB items cap at 400 KB.
     return zlib.compress(json.dumps(data, ensure_ascii=False).encode())
@@ -54,6 +56,8 @@ def load(raw: bytes) -> Session:
         pending=pending,
         bookings=data["bookings"],
         event_types={int(k): v for k, v in data["event_types"].items()},  # JSON object keys are strings
+        slots=set(data.get("slots") or []),
+        offered=data.get("offered") or [],
     )
 
 

@@ -59,6 +59,7 @@ class CalClient:
         version: str | None = None,
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
+        full: bool = False,
     ) -> Any:
         headers = {"cal-api-version": version} if version else {}
         params = {k: v for k, v in (params or {}).items() if v is not None}
@@ -69,13 +70,21 @@ class CalClient:
             body = None
         if resp.is_error or (isinstance(body, dict) and body.get("status") == "error"):
             raise CalComError(resp.status_code, _error_message(body, resp.text))
-        return body.get("data") if isinstance(body, dict) else body
+        if full or not isinstance(body, dict):
+            return body
+        return body.get("data")
 
     async def me(self) -> dict[str, Any]:
         return await self._request("GET", "/me")
 
     async def list_event_types(self) -> list[dict[str, Any]]:
         return await self._request("GET", "/event-types", version=V_EVENT_TYPES) or []
+
+    async def create_event_type(self, body: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("POST", "/event-types", version=V_EVENT_TYPES, json=body)
+
+    async def delete_event_type(self, event_type_id: int) -> None:
+        await self._request("DELETE", f"/event-types/{event_type_id}", version=V_EVENT_TYPES)
 
     async def get_slots(
         self,
@@ -84,6 +93,7 @@ class CalClient:
         start: str,
         end: str,
         time_zone: str,
+        duration: int | None = None,
         booking_uid_to_reschedule: str | None = None,
     ) -> dict[str, list[Any]]:
         """Returns {"YYYY-MM-DD": [{"start": ..., "end": ...}, ...]} for the range (UTC bounds)."""
@@ -96,6 +106,7 @@ class CalClient:
                 "start": start,
                 "end": end,
                 "timeZone": time_zone,
+                "duration": duration,
                 "bookingUidToReschedule": booking_uid_to_reschedule,
                 "format": "range",
             },
@@ -108,23 +119,32 @@ class CalClient:
         after_start: str | None = None,
         before_end: str | None = None,
         attendee_name: str | None = None,
+        attendee_email: str | None = None,
+        event_type_id: int | None = None,
         booking_uid: str | None = None,
-        limit: int = 100,
+        max_pages: int = 5,
     ) -> list[dict[str, Any]]:
-        return await self._request(
-            "GET",
-            "/bookings",
-            version=V_BOOKINGS_LIST,
-            params={
-                "status": status,
-                "afterStart": after_start,
-                "beforeEnd": before_end,
-                "attendeeName": attendee_name,
-                "bookingUid": booking_uid,
-                "sortStart": "asc",
-                "limit": limit,
-            },
-        ) or []
+        """All matching bookings, following cal.com's cursor pagination (100 per page, up to `max_pages`)."""
+        params: dict[str, Any] = {
+            "status": status,
+            "afterStart": after_start,
+            "beforeEnd": before_end,
+            "attendeeName": attendee_name,
+            "attendeeEmail": attendee_email,
+            "eventTypeId": event_type_id,
+            "bookingUid": booking_uid,
+            "sortStart": "asc",
+            "limit": 100,
+        }
+        bookings: list[dict[str, Any]] = []
+        for _ in range(max_pages):
+            body = await self._request("GET", "/bookings", version=V_BOOKINGS_LIST, params=params, full=True)
+            bookings += body.get("data") or []
+            page = body.get("pagination") or {}
+            if not (page.get("hasMore") and page.get("nextCursor")):
+                break
+            params["cursor"] = page["nextCursor"]
+        return bookings
 
     async def create_booking(
         self,
@@ -132,12 +152,25 @@ class CalClient:
         event_type_id: int,
         start: str,
         attendee: dict[str, Any],
+        length_in_minutes: int | None = None,
+        location: dict[str, Any] | None = None,
+        guests: list[str] | None = None,
         notes: str | None = None,
-    ) -> dict[str, Any]:
-        # The event type sets the length; cal.com rejects lengthInMinutes for fixed-length types.
+        allow_conflicts: bool = False,
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        """Returns the booking, or a list of occurrences for a recurring event type."""
         body: dict[str, Any] = {"eventTypeId": event_type_id, "start": start, "attendee": attendee}
+        if length_in_minutes:
+            # Only valid for event types with several lengths; the server checks this before calling.
+            body["lengthInMinutes"] = length_in_minutes
+        if location:
+            body["location"] = location  # must be one of the event type's locations
+        if guests:
+            body["guests"] = guests
         if notes:
             body["bookingFieldsResponses"] = {"notes": notes}
+        if allow_conflicts:
+            body["allowConflicts"] = True  # host-only override: book even if the host is busy
         return await self._request("POST", "/bookings", version=V_BOOKINGS_WRITE, json=body)
 
     async def reschedule_booking(

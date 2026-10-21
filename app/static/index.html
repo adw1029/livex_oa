@@ -67,8 +67,32 @@
   /* ================= Sidebar (ink) ================= */
   .side { background: var(--side-bg); color: var(--side-text); display: flex; flex-direction: column; min-height: 0; }
   .side-scroll { overflow-y: auto; flex: 1; padding: 28px 24px 16px; scrollbar-color: #333 transparent; }
-  .today .dow { color: var(--blue-bright); }
-  .today .date { font-size: 40px; font-weight: 400; letter-spacing: -.035em; line-height: 1.05; margin-top: 8px; }
+  .today-head .dow { color: var(--blue-bright); }
+  .side-seg { display: flex; margin-top: 20px; padding: 3px; border: 1px solid var(--side-line); border-radius: 300px; }
+  .side-seg button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; border-radius: 300px; font-size: 14px; color: var(--side-text-2); transition: background .2s, color .2s; }
+  .side-seg button svg { width: 15px; height: 15px; }
+  .side-seg button:hover { color: #fff; }
+  .side-seg button.on { background: #fff; color: var(--ink); }
+  .app:not(.cal-on) .mini, .app.cal-on .smart { display: none; }
+  .today-head .date { font-size: 32px; font-weight: 400; letter-spacing: -.03em; line-height: 1.05; margin-top: 10px; }
+
+  /* Mini month: dots mark days with meetings; click a day to open it */
+  .mini { margin-top: 18px; padding: 14px 12px 10px; border: 1px solid var(--side-line); border-radius: 10px; background: var(--side-card); }
+  .mini-top { display: flex; align-items: center; gap: 4px; padding: 0 4px 8px; }
+  .mini-top b { flex: 1; font-weight: 500; font-size: 15px; letter-spacing: -.01em; }
+  .mini-top button { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: var(--side-text-2); }
+  .mini-top button:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+  .mini-top svg { width: 13px; height: 13px; }
+  .mini-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 2px; text-align: center; }
+  .mini-grid .wd { font-family: var(--dot); font-weight: 700; font-size: 11px; color: var(--side-text-2); padding-bottom: 4px; }
+  .mini-grid button { position: relative; justify-self: center; width: 34px; height: 34px; border-radius: 50%; font-size: 13.5px; color: var(--side-text); transition: background .15s; }
+  .mini-grid button:hover { background: rgba(255, 255, 255, .1); }
+  .mini-grid button.out { color: rgba(255, 255, 255, .28); }
+  .mini-grid button.past:not(.today) { color: rgba(255, 255, 255, .5); }
+  .mini-grid button.today { background: var(--blue-bright); color: #fff; font-weight: 500; }
+  .mini-grid button.sel:not(.today) { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .7); }
+  .mini-grid button.has::after { content: ""; position: absolute; left: 50%; bottom: 4px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--blue-bright); }
+  .mini-grid button.today.has::after { background: #fff; }
   .side-toggle { display: none; }
 
   .next {
@@ -114,13 +138,13 @@
   }
   .ev:hover .acts, .ev:focus-within .acts, .ev.sel .acts { opacity: 1; pointer-events: auto; }
   .ev:hover .body, .ev.sel .body { padding-right: 80px; }
-  .acts button {
+  .ev .acts button {
     width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
     border: 1px solid rgba(255, 255, 255, .35); color: #fff; background: var(--side-bg); transition: background .2s, color .2s, border-color .2s;
   }
-  .acts button:hover { background: #fff; color: var(--ink); border-color: #fff; }
-  .acts button.x:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
-  .acts svg { width: 14px; height: 14px; }
+  .ev .acts button:hover { background: #fff; color: var(--ink); border-color: #fff; }
+  .ev .acts button.x:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+  .ev .acts svg { width: 14px; height: 14px; }
 
   .side-note { padding: 22px 0 0; color: var(--side-text-2); }
   .side-foot { padding: 14px 24px 18px; display: flex; align-items: center; gap: 6px; color: var(--side-text-2); border-top: 1px solid var(--side-line); }
@@ -182,6 +206,30 @@
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; animation: rise .35s var(--ease) both; }
   .chip { height: 34px; padding: 0 15px; border-radius: 300px; font-size: 14px; border: 1px solid var(--blue); color: var(--blue); transition: background .2s, color .2s; }
   .chip:hover { background: var(--blue); color: #fff; }
+
+  /* Time picker: offered slots grouped by day */
+  .picker { align-self: flex-start; width: min(100%, 560px); margin-top: 12px; padding: 14px 16px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; animation: rise .35s var(--ease) both; }
+  .picker .pday + .pday { margin-top: 14px; }
+  .picker .eyebrow { color: var(--text-2); }
+  .picker .ptimes { display: grid; grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); gap: 6px; margin-top: 8px; }
+  .picker button { height: 34px; border-radius: 300px; font-size: 13.5px; border: 1px solid var(--line); color: var(--text-2); transition: border-color .2s, background .2s, color .2s; }
+  .picker button.sug { border-color: var(--blue); color: var(--blue); font-weight: 500; }
+  .picker .note { margin: -2px 0 10px; font-size: 13px; color: var(--text-2); }
+  .picker .note b { color: var(--blue); font-weight: 500; }
+  .picker button:not(:disabled):hover { border-color: var(--blue); color: var(--blue); }
+  .picker button.on { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .picker button:disabled:not(.on) { opacity: .45; cursor: default; }
+
+  /* Meeting cards in the thread */
+  .mlist { align-self: flex-start; width: min(100%, 460px); margin-top: 12px; display: grid; gap: 8px; animation: rise .35s var(--ease) both; }
+  .mcard { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 10px; }
+  .mcard.off { border-left-color: var(--line); opacity: .7; }
+  .mcard .body { flex: 1; min-width: 0; }
+  .mcard .name { font-size: 16px; font-weight: 500; letter-spacing: -.01em; }
+  .mcard .row { display: flex; align-items: center; gap: 7px; margin-top: 5px; font-size: 14px; color: var(--text-2); }
+  .mcard .row svg { width: 14px; height: 14px; flex: none; }
+  .mcard .tag { font-size: 12px; color: var(--text-2); border: 1px solid var(--line); border-radius: 300px; padding: 3px 10px; white-space: nowrap; }
+  .mcard a.tag { color: var(--blue); border-color: var(--blue); text-decoration: none; }
   @media (prefers-color-scheme: dark) { .chip { border-color: var(--blue-bright); color: var(--blue-bright); } .chip:hover { background: var(--blue-bright); color: var(--ink); } }
 
   .card { align-self: flex-start; width: min(100%, 420px); margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; animation: rise .4s var(--ease) both; }
@@ -193,6 +241,7 @@
   .event .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--text-2); }
   .event .row svg { width: 15px; height: 15px; flex: none; }
   .event .row.when { color: var(--text); }
+  .event .row.warn { color: var(--warn); }
   .actions { display: flex; gap: 8px; padding: 16px 20px 20px; }
   .btn { flex: 1; height: 44px; border-radius: 300px; font-size: 15px; transition: background .2s, color .2s, border-color .2s, transform .12s; }
   .btn:active { transform: scale(.98); }
@@ -236,6 +285,86 @@
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
   .toast svg { width: 16px; height: 16px; color: #ff7a7a; flex: none; }
 
+  /* ================= Calendar view ================= */
+  .seg { margin-left: auto; display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 300px; background: var(--surface); }
+  .seg button { height: 30px; padding: 0 14px; border-radius: 300px; font-size: 14px; color: var(--text-2); transition: background .2s, color .2s; }
+  .seg button:hover { color: var(--text); }
+  .seg button.on { background: var(--text); color: var(--paper); }
+  .navbar .seg { display: none; }  /* the sidebar switch does this on wide screens */
+  .app.cal-on main, .app.cal-on .composer { display: none; }
+  .calview { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+  .calview[hidden] { display: none; }
+  .cal-bar { display: flex; align-items: center; gap: 8px; padding: 14px 28px; border-bottom: 1px solid var(--line); }
+  .cal-bar h2 { margin: 0 0 0 8px; font-size: 22px; font-weight: 400; letter-spacing: -.02em; white-space: nowrap; }
+  .cal-bar .nav { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; flex: none; }
+  .cal-bar .nav svg { width: 14px; height: 14px; }
+  .cal-bar .nav:hover, .cal-bar .today-btn:hover { border-color: var(--text); }
+  .cal-bar .today-btn { height: 34px; padding: 0 16px; border-radius: 300px; border: 1px solid var(--line); font-size: 14px; }
+  .cal-body { flex: 1; min-height: 0; overflow: auto; transition: opacity .2s; }
+  .cal-body.loading { opacity: .5; }
+
+  .mhead-row, .mgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .mhead-row { position: sticky; top: 0; z-index: 2; background: var(--paper); border-bottom: 1px solid var(--line); }
+  .mhead-row div { padding: 10px 12px 8px; color: var(--text-2); }
+  .mgrid { grid-auto-rows: minmax(112px, 1fr); min-height: calc(100% - 37px); }
+  .mcell { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 6px 6px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; transition: background .15s; }
+  .mcell:nth-child(7n) { border-right: 0; }
+  .mcell:hover { background: var(--blue-soft); }
+  .mcell .num { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; margin-bottom: 2px; }
+  .mcell.today .num { background: var(--blue); color: #fff; }
+  .mcell.out .num, .mcell.out .mev { opacity: .4; }
+  .mev { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 6px; border-radius: 6px; font-size: 12.5px; text-align: left; color: var(--text); }
+  .mev:hover { background: var(--surface); }
+  .mev i { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); flex: none; }
+  .mev .tx { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mev .tx em { font-style: normal; color: var(--text-2); }
+  .mcell .more { font-size: 12px; color: var(--text-2); padding: 1px 6px; }
+
+  .tl { --hour: 48px; --gutter: 56px; }
+  .tl-head, .tl-grid { display: grid; grid-template-columns: var(--gutter) repeat(var(--cols), minmax(96px, 1fr)); }
+  .tl-head { position: sticky; top: 0; z-index: 4; background: var(--paper); border-bottom: 1px solid var(--line); }
+  .tl-day { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0 10px; color: var(--text-2); }
+  .tl-day .n { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 19px; color: var(--text); transition: background .15s; }
+  .tl-day:hover .n { background: var(--blue-soft); }
+  .tl-day.today .n { background: var(--blue); color: #fff; }
+  .tl-h { height: var(--hour); position: relative; }
+  .tl-h span { position: absolute; top: -7px; right: 10px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+  .tl-h:first-child span { top: 4px; }
+  .tl-col { position: relative; border-left: 1px solid var(--line); }
+  .tl-slot { height: var(--hour); border-bottom: 1px solid var(--line); background: linear-gradient(to bottom, transparent calc(50% - .5px), color-mix(in srgb, var(--line) 55%, transparent) 50%, transparent calc(50% + .5px)); cursor: pointer; }
+  .tl-slot:hover { background-color: var(--blue-soft); }
+  .tl-ev { position: absolute; z-index: 1; display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; border-radius: 6px; overflow: hidden; text-align: left; font-size: 12.5px; line-height: 1.25; background: var(--blue); color: #fff; box-shadow: 0 0 0 1.5px var(--paper); transition: filter .15s; }
+  .tl-ev:hover { filter: brightness(1.12); }
+  .tl-ev b { flex: none; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tl-ev span { flex: none; opacity: .8; white-space: nowrap; }
+  .tl-ev.short { flex-direction: row; align-items: center; gap: 6px; padding: 0 8px; }
+  .tl-ev.short b { flex: 0 1 auto; min-width: 2.5em; }
+  .tl-ev.short span { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tl-ev.past { background: var(--line); color: var(--text-2); }
+  .tl-ev.pending { background: var(--surface); color: var(--blue); border: 1px dashed var(--blue); }
+  .tl-now { position: absolute; left: -1px; right: 0; z-index: 3; height: 2px; background: var(--danger); pointer-events: none; }
+  .tl-now::before { content: ""; position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); }
+  .cal-empty { position: sticky; left: 0; padding: 10px 28px; color: var(--text-2); font-size: 14px; }
+
+  .evpop { position: absolute; z-index: 10; width: min(320px, calc(100% - 32px)); padding: 16px 18px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 16px 48px rgba(0, 0, 0, .16); animation: rise .2s var(--ease) both; }
+  .evpop[hidden] { display: none; }
+  .evpop .eyebrow { color: var(--blue); }
+  .evpop .name { font-size: 20px; letter-spacing: -.02em; line-height: 1.2; margin: 6px 28px 8px 0; }
+  .evpop .row { display: flex; align-items: flex-start; gap: 8px; margin-top: 7px; font-size: 14px; color: var(--text-2); overflow-wrap: anywhere; }
+  .evpop .row svg { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+  .evpop .row a { color: var(--blue); }
+  .evpop .close { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--text-2); }
+  .evpop .close:hover { background: var(--blue-soft); }
+  .evpop .close svg { width: 14px; height: 14px; }
+  .evpop .acts { display: flex; gap: 8px; margin-top: 16px; }
+  .evpop .act { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 12px; border-radius: 300px; border: 1px solid var(--line); font-size: 14px; color: var(--text); text-decoration: none; transition: border-color .2s, background .2s, color .2s, filter .2s; }
+  .evpop .act svg { width: 14px; height: 14px; flex: none; }
+  .evpop .act:hover { border-color: var(--text); }
+  .evpop .act.join { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .evpop .act.join:hover { filter: brightness(1.15); }
+  .evpop .act.danger { color: var(--danger); }
+  .evpop .act.danger:hover { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+
   /* ================= Narrow screens ================= */
   @media (max-width: 900px) {
     .app { display: flex; flex-direction: column; }
@@ -247,7 +376,7 @@
     main { order: 2; min-height: 0; }
     .composer { order: 3; padding: 8px 14px max(14px, env(safe-area-inset-bottom)); }
     .side-scroll { padding: 14px 16px 12px; }
-    .today { display: none; }
+    .today-head, .mini { display: none; }
     .next { margin-top: 0; padding: 14px 16px; }
     .next .title { font-size: 19px; margin-top: 8px; }
     .side-toggle { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 12px 0 0; color: var(--side-text-2); }
@@ -260,6 +389,19 @@
     .msg { max-width: 86%; }
     .suggest { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
     .suggest button { flex: none; }
+    .calview { order: 2; }
+    .app.cal-on .side { display: none; }
+    .navbar .pill-btn { padding: 0 11px; }
+    .navbar .pill-btn span, .brand .eyebrow { display: none; }
+    .seg button { padding: 0 11px; }
+    .navbar .seg { display: inline-flex; }
+    .navbar .seg + .pill-btn { margin-left: 10px; }
+    .cal-bar { flex-wrap: wrap; padding: 10px 14px; gap: 6px; }
+    .cal-bar h2 { order: 5; width: 100%; margin: 4px 0 0; font-size: 18px; }
+    .mgrid { grid-auto-rows: minmax(64px, 1fr); }
+    .mev { justify-content: center; padding: 2px; }
+    .mev .tx { display: none; }
+    .tl { --gutter: 44px; }
   }
   /* ================= Passcode gate (hosted only) ================= */
   .gate { position: fixed; inset: 0; z-index: 30; display: none; place-items: center; padding: 16px; background: var(--side-bg); }
@@ -279,9 +421,30 @@
 <div class="app">
   <aside class="side" id="side" aria-label="Upcoming meetings">
     <div class="side-scroll">
-      <div class="today"><div class="dow eyebrow" id="dow"></div><div class="date" id="date"></div></div>
-      <div id="next"><div class="skel" style="height:96px;margin-top:18px"></div></div>
-      <div class="list" id="list"><div class="skel"></div><div class="skel"></div></div>
+      <div class="today-head">
+        <div class="dow eyebrow" id="dow"></div>
+        <div class="date" id="date"></div>
+        <div class="side-seg" role="tablist" aria-label="Sidebar view">
+          <button type="button" role="tab" data-view="chat" class="on">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg>Smart view
+          </button>
+          <button type="button" role="tab" data-view="cal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>Calendar
+          </button>
+        </div>
+      </div>
+      <div class="mini" id="mini" aria-label="Month">
+        <div class="mini-top">
+          <b id="mini-title"></b>
+          <button type="button" id="mini-prev" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+          <button type="button" id="mini-next" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button>
+        </div>
+        <div class="mini-grid" id="mini-grid"></div>
+      </div>
+      <div class="smart">
+        <div id="next"><div class="skel" style="height:96px;margin-top:18px"></div></div>
+        <div class="list" id="list"><div class="skel"></div><div class="skel"></div></div>
+      </div>
       <button class="side-toggle" id="side-toggle" type="button" aria-expanded="false">
         <span class="eyebrow" id="side-toggle-text">Show schedule</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
@@ -296,13 +459,30 @@
         <img class="mark" src="logo.png" alt="" width="26" height="26">
         <div><strong>LiveX.AI Assistant</strong><span class="eyebrow" id="tz"></span></div>
       </div>
+      <div class="seg" id="viewseg" role="tablist" aria-label="View">
+        <button type="button" role="tab" data-view="chat" class="on">Chat</button>
+        <button type="button" role="tab" data-view="cal">Calendar</button>
+      </div>
       <button class="pill-btn" id="reset" type="button" aria-label="New conversation">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>New chat</span>
       </button>
       <button class="pill-btn quiet" id="logout" type="button" aria-label="Log out" title="Log out" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10"/></svg><span>Log out</span>
       </button>
     </header>
+    <section class="calview" id="calview" aria-label="Calendar" hidden>
+      <div class="cal-bar">
+        <button type="button" class="today-btn" id="cal-today">Today</button>
+        <button type="button" class="nav" id="cal-prev" aria-label="Previous"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+        <button type="button" class="nav" id="cal-next" aria-label="Next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button>
+        <h2 id="cal-title"></h2>
+        <div class="seg" id="cal-views" role="tablist" aria-label="Range">
+          <button type="button" role="tab" data-v="day">Day</button><button type="button" role="tab" data-v="week">Week</button><button type="button" role="tab" data-v="month">Month</button>
+        </div>
+      </div>
+      <div class="cal-body" id="cal-body"></div>
+      <div class="evpop" id="evpop" role="dialog" aria-label="Meeting details" hidden></div>
+    </section>
     <main id="scroll">
       <div class="thread" id="thread">
         <div class="welcome" id="welcome">
@@ -352,6 +532,8 @@ const fmtWeekday = new Intl.DateTimeFormat([], { weekday: "short" });
 
 const ICON = {
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+  pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z"/><circle cx="12" cy="10" r="2.3"/></svg>',
+  warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 2.8 19.5h18.4Z"/><path d="M12 10v4M12 17h.01"/></svg>',
   person: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
   note: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h9"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1.2 14.2-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4Z"/></svg>',
@@ -379,7 +561,7 @@ let busy = false, started = false, agenda = [], profile = {};
   const abbr = new Intl.DateTimeFormat([], { timeZoneName: "short" }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value;
   $("tz").textContent = abbr ? `${city} · ${abbr}` : city;
   $("dow").textContent = now.toLocaleDateString([], { weekday: "long" });
-  $("date").textContent = now.toLocaleDateString([], { month: "long", day: "numeric" });
+  $("date").textContent = now.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
 })();
 function greet() {
   const h = new Date().getHours();
@@ -489,10 +671,19 @@ function drawAgenda() {
 function suggest() {
   const box = $("suggest");
   if (started) { box.innerHTML = ""; return; }
-  const next = upcoming()[0];
-  const ideas = ["What's on tomorrow?", "Book a 30-min meeting this week"];
-  if (next) ideas.unshift(`Move my ${phrase(next).when}`);
-  else ideas.push("Find an open hour Thursday");
+  const now = new Date(), next = upcoming()[0];
+  const bookDay = [0, 6].includes(addDays(now, 1).getDay()) ? "Monday" : "tomorrow";  // skip weekends
+  let move = "When am I free this week?";
+  if (next) {
+    const start = new Date(next.start), day = dayLabel(start);
+    const when = day === "Today" ? "today" : day === "Tomorrow" ? "tomorrow" : `on ${fmtWeekday.format(start)}`;
+    move = `Reschedule my ${fmtTime.format(start)} ${when}`;
+  }
+  const ideas = [
+    now.getHours() >= 17 ? "What's on my calendar tomorrow?" : "What's on my calendar today?",
+    `Book a quick 30-min call ${bookDay} afternoon`,
+    move,
+  ];
   box.innerHTML = ideas.map((t) => `<button type="button">${escapeHtml(t)}</button>`).join("");
   box.querySelectorAll("button").forEach((b) => (b.onclick = () => send(b.textContent)));
   $("welcome-sub").textContent = next
@@ -570,6 +761,8 @@ function confirmCard(action) {
         <div class="name">${escapeHtml((i.title || "Meeting").split(" between ")[0])}</div>
         ${i.when ? `<div class="row when">${ICON.clock}<span>${escapeHtml(i.when)}</span></div>` : ""}
         ${i.detail ? `<div class="row">${i.action === "Book" ? ICON.person : ICON.note}<span>${escapeHtml(i.detail)}</span></div>` : ""}
+        ${i.where ? `<div class="row">${ICON.pin}<span>${escapeHtml(i.where)}</span></div>` : ""}
+        ${i.warning ? `<div class="row warn">${ICON.warn}<span>${escapeHtml(i.warning)}</span></div>` : ""}
       </div>
     </div>`).join("") + `
     <div class="actions">
@@ -618,16 +811,55 @@ async function api(path, init = {}) {
 function post(path, body) {
   return api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
+function timePicker(times) {
+  const box = document.createElement("div");
+  box.className = "picker";
+  const byDay = new Map();
+  times.forEach((t) => byDay.set(t.day, [...(byDay.get(t.day) || []), t]));
+  const note = times.some((t) => t.suggested) && times.some((t) => !t.suggested)
+    ? `<div class="note"><b>Suggested</b> times are outlined; every open time is shown.</div>` : "";
+  box.innerHTML = note + [...byDay].map(([day, ts]) => `
+    <div class="pday"><div class="eyebrow">${escapeHtml(day)} · ${ts.length} open</div>
+      <div class="ptimes">${ts.map((t) => `<button type="button" class="${t.suggested ? "sug" : ""}" data-pick="${escapeHtml(`${day}, ${t.time}`)}">${escapeHtml(t.time)}</button>`).join("")}</div>
+    </div>`).join("");
+  box.querySelectorAll("[data-pick]").forEach((b) => (b.onclick = () => {
+    if (busy) return;
+    box.querySelectorAll("button").forEach((x) => (x.disabled = true));
+    b.classList.add("on");
+    send(b.dataset.pick);
+  }));
+  return add(box);
+}
+function meetingCards(meetings) {
+  const box = document.createElement("div");
+  box.className = "mlist";
+  box.innerHTML = meetings.map((m) => {
+    const off = m.status === "cancelled" || m.status === "rejected";
+    const link = !off && /^https?:\/\//.test(m.location || "") ? m.location : null;
+    const tag = off ? `<span class="tag">Cancelled</span>`
+      : m.status === "pending" ? `<span class="tag">Needs approval</span>`
+      : link ? `<a class="tag" href="${escapeHtml(link)}" target="_blank" rel="noopener">Join</a>` : "";
+    return `<div class="mcard${off ? " off" : ""}"><div class="body">
+      <div class="name">${escapeHtml(shortTitle(m))}</div>
+      <div class="row">${ICON.clock}<span>${escapeHtml(m.when)}</span></div>
+      ${who(m) ? `<div class="row">${ICON.person}<span>${escapeHtml(who(m))}</span></div>` : ""}
+    </div>${tag}</div>`;
+  }).join("");
+  return add(box);
+}
 function render(turn) {
   if (turn.reply) bubble("bot", turn.reply);
+  if (turn.meetings?.length) meetingCards(turn.meetings);
+  if (turn.times?.length) timePicker(turn.times);
   if (turn.pending_action) confirmCard(turn.pending_action);
   chips(turn.suggestions);
-  if (turn.calendar_changed) loadAgenda();
+  if (turn.calendar_changed) { loadAgenda(); cal.cache.clear(); drawMini(); }
 }
 async function send(text) {
   text = (text ?? input.value).trim();
   if (!text || busy) return;
   input.value = ""; autosize(); clearChips();
+  thread.querySelectorAll(".picker button").forEach((b) => (b.disabled = true));  // offered times are now stale
   thread.querySelectorAll(".card:not(.done)").forEach((c) => settle(c, false, "Answered in chat"));
   bubble("user", text);
   setBusy(true);
@@ -643,6 +875,245 @@ async function decide(card, actionId, approve) {
   catch (e) { toast(e.message); card.classList.remove("done"); }
   finally { setBusy(false); input.focus(); }
 }
+
+// ================= Calendar view =================
+// Day / week / month views of cal.com bookings, loaded straight from /api/agenda (no LLM).
+const HOUR_PX = 48;
+const cal = { view: matchMedia("(max-width: 900px)").matches ? "day" : "week", date: startOfDay(new Date()), cache: new Map(), items: [], h0: 7 };
+const fmtMonth = new Intl.DateTimeFormat([], { month: "long", year: "numeric" });
+const fmtLong = new Intl.DateTimeFormat([], { weekday: "long", month: "short", day: "numeric" });
+const fmtMD = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
+const fmtHour = new Intl.DateTimeFormat([], { hour: "numeric" });
+
+function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function minutesFrom(d, h0) { return (d.getHours() - h0) * 60 + d.getMinutes(); }
+function byDay(items) {
+  const m = new Map();
+  [...items].sort((a, b) => new Date(a.start) - new Date(b.start))
+    .forEach((b) => { const k = ymd(new Date(b.start)); m.set(k, [...(m.get(k) || []), b]); });
+  return m;
+}
+
+function calRange() {
+  const d = cal.date;
+  if (cal.view === "day") return [d, d];
+  if (cal.view === "week") { const s = addDays(d, -d.getDay()); return [s, addDays(s, 6)]; }
+  return monthGrid(d);
+}
+function monthGrid(d) {  // full weeks covering d's month
+  const first = new Date(d.getFullYear(), d.getMonth(), 1), last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return [addDays(first, -first.getDay()), addDays(last, 6 - last.getDay())];
+}
+
+// Sidebar mini month
+const mini = { month: new Date(new Date().getFullYear(), new Date().getMonth(), 1) };
+const fmtNarrow = new Intl.DateTimeFormat([], { weekday: "narrow" });
+async function drawMini() {
+  const m = mini.month, [s, e] = monthGrid(m), key = `${ymd(s)}_${ymd(e)}`;
+  const paint = (items) => {
+    const busyDays = new Set(items.map((b) => ymd(new Date(b.start))));
+    const today = ymd(new Date()), sel = $("calview").hidden ? null : ymd(cal.date);
+    let html = Array.from({ length: 7 }, (_, i) => `<span class="wd">${escapeHtml(fmtNarrow.format(addDays(s, i)))}</span>`).join("");
+    for (let d = s; d <= e; d = addDays(d, 1)) {
+      const k = ymd(d);
+      const cls = [d.getMonth() !== m.getMonth() && "out", k === today ? "today" : k < today && "past", k === sel && "sel", busyDays.has(k) && "has"];
+      html += `<button type="button" data-day="${k}" class="${cls.filter(Boolean).join(" ")}" aria-label="${escapeHtml(fmtLong.format(d))}">${d.getDate()}</button>`;
+    }
+    $("mini-grid").innerHTML = html;
+  };
+  $("mini-title").textContent = fmtMonth.format(m);
+  paint(cal.cache.get(key) || []);
+  if (cal.cache.has(key)) return;
+  try {
+    const items = await fetchRange(s, e);
+    if (mini.month === m) paint(items);
+  } catch { /* the sidebar list shows load errors */ }
+}
+
+// Active meetings between two local dates; shared by the calendar and the mini month.
+async function fetchRange(s, e) {
+  const key = `${ymd(s)}_${ymd(e)}`;
+  if (!cal.cache.has(key)) {
+    const data = await api(`/api/agenda?timezone=${encodeURIComponent(tz)}&start=${ymd(s)}&end=${ymd(e)}`);
+    cal.cache.set(key, (data.bookings || []).filter((b) => b.status !== "cancelled" && b.status !== "rejected"));
+  }
+  return cal.cache.get(key);
+}
+
+async function calLoad() {
+  const [s, e] = calRange(), key = `${ymd(s)}_${ymd(e)}`;
+  closeEvent();
+  calTitle(s, e);
+  mini.month = new Date(cal.date.getFullYear(), cal.date.getMonth(), 1);
+  drawMini();
+  $("cal-body").classList.add("loading");
+  try {
+    cal.items = await fetchRange(s, e);
+  } catch (err) {
+    toast(err.message);
+    return;
+  } finally {
+    $("cal-body").classList.remove("loading");
+  }
+  if (key !== `${ymd(calRange()[0])}_${ymd(calRange()[1])}`) return;  // the user already moved on
+  calTitle(s, e);
+  $("cal-body").innerHTML = cal.view === "month" ? monthHtml(cal.items, s, e)
+    : timelineHtml(cal.items, Array.from({ length: cal.view === "day" ? 1 : 7 }, (_, i) => addDays(s, i)));
+  if (cal.view !== "month") {
+    const first = cal.items.map((b) => new Date(b.start)).filter((d) => d >= s).sort((a, b) => a - b)[0];
+    const focus = first && first.getHours() < 8 ? first.getHours() : 8;
+    $("cal-body").scrollTop = Math.max(0, (focus - cal.h0) * HOUR_PX - 8);
+  }
+}
+function calTitle(s, e) {
+  $("cal-title").textContent = cal.view === "month" ? fmtMonth.format(cal.date)
+    : cal.view === "week" ? `${fmtMD.format(s)} – ${fmtMD.format(e)}, ${e.getFullYear()}` : fmtLong.format(cal.date);
+  document.querySelectorAll("#cal-views button").forEach((b) => b.classList.toggle("on", b.dataset.v === cal.view));
+}
+
+function monthHtml(items, s, e) {
+  const days = byDay(items), today = ymd(new Date()), month = cal.date.getMonth();
+  let cells = "";
+  for (let d = s; d <= e; d = addDays(d, 1)) {
+    const evs = days.get(ymd(d)) || [];
+    cells += `<div class="mcell ${d.getMonth() !== month ? "out" : ""} ${ymd(d) === today ? "today" : ""}" data-day="${ymd(d)}">
+      <span class="num">${d.getDate()}</span>
+      ${evs.slice(0, 3).map((b) => `<button type="button" class="mev" data-uid="${escapeHtml(b.uid)}" title="${escapeHtml(shortTitle(b))}"><i></i><span class="tx"><em>${escapeHtml(fmtTime.format(new Date(b.start)))}</em> ${escapeHtml(shortTitle(b))}</span></button>`).join("")}
+      ${evs.length > 3 ? `<span class="more">+${evs.length - 3} more</span>` : ""}
+    </div>`;
+  }
+  const heads = Array.from({ length: 7 }, (_, i) => `<div class="eyebrow">${escapeHtml(fmtWeekday.format(addDays(s, i)))}</div>`).join("");
+  return `<div class="mhead-row">${heads}</div><div class="mgrid">${cells}</div>`;
+}
+
+function timelineHtml(items, days) {
+  const map = byDay(items), now = new Date();
+  let h0 = 7, h1 = 20;  // default window, stretched to fit any meeting
+  items.forEach((b) => {
+    const s = new Date(b.start), e = new Date(b.end);
+    h0 = Math.min(h0, s.getHours());
+    h1 = Math.max(h1, e.getHours() + (e.getMinutes() ? 1 : 0));
+  });
+  cal.h0 = h0;
+  const hours = Array.from({ length: Math.min(h1, 24) - h0 }, (_, i) => h0 + i);
+  const head = `<div class="tl-head"><div></div>${days.map((d) => `
+    <button type="button" class="tl-day ${ymd(d) === ymd(now) ? "today" : ""}" data-day="${ymd(d)}">
+      <span class="eyebrow">${escapeHtml(fmtWeekday.format(d))}</span><span class="n">${d.getDate()}</span>
+    </button>`).join("")}</div>`;
+  const gutter = `<div>${hours.map((h) => `<div class="tl-h"><span>${escapeHtml(fmtHour.format(new Date(2000, 0, 1, h)))}</span></div>`).join("")}</div>`;
+  const cols = days.map((d) => {
+    const evs = lanes(map.get(ymd(d)) || []).map(({ b, lane, lanes: n }) => {
+      const s = new Date(b.start), e = new Date(b.end);
+      const top = minutesFrom(s, h0) * HOUR_PX / 60, height = Math.max((e - s) / 60000 * HOUR_PX / 60, 22);
+      return `<button type="button" class="tl-ev ${height < 40 ? "short" : ""} ${e < now ? "past" : ""} ${b.status === "pending" ? "pending" : ""}" data-uid="${escapeHtml(b.uid)}"
+        style="top:${top}px;height:${height}px;left:calc(${lane} * 100% / ${n} + 3px);width:calc(100% / ${n} - 6px)">
+        <b>${escapeHtml(shortTitle(b))}</b><span>${escapeHtml(fmtTime.format(s))} – ${escapeHtml(fmtTime.format(e))}</span></button>`;
+    }).join("");
+    const line = ymd(d) === ymd(now) && now.getHours() >= h0 && now.getHours() < h0 + hours.length
+      ? `<div class="tl-now" style="top:${minutesFrom(now, h0) * HOUR_PX / 60}px"></div>` : "";
+    return `<div class="tl-col" data-day="${ymd(d)}">${hours.map(() => `<div class="tl-slot"></div>`).join("")}${evs}${line}</div>`;
+  }).join("");
+  const empty = items.length ? "" : `<div class="cal-empty">No meetings ${cal.view === "day" ? "this day" : "this week"}. Click a time to book one.</div>`;
+  return `<div class="tl" style="--cols:${days.length}">${head}${empty}<div class="tl-grid" style="height:${hours.length * HOUR_PX}px">${gutter}${cols}</div></div>`;
+}
+
+// Overlapping meetings share the column side by side.
+function lanes(evs) {
+  const out = [];
+  let cluster = [], ends = [], clusterEnd = 0;
+  const flush = () => { cluster.forEach((x) => (x.lanes = ends.length)); out.push(...cluster); cluster = []; ends = []; clusterEnd = 0; };
+  for (const b of [...evs].sort((a, b) => new Date(a.start) - new Date(b.start))) {
+    const s = +new Date(b.start), e = +new Date(b.end);
+    if (cluster.length && s >= clusterEnd) flush();
+    let lane = ends.findIndex((end) => end <= s);
+    if (lane < 0) { lane = ends.length; ends.push(e); } else ends[lane] = e;
+    cluster.push({ b, lane });
+    clusterEnd = Math.max(clusterEnd, e);
+  }
+  flush();
+  return out;
+}
+
+function openEvent(uid, anchor) {
+  const b = cal.items.find((x) => x.uid === uid);
+  if (!b) return;
+  const s = new Date(b.start), e = new Date(b.end), past = e < new Date();
+  const link = /^https?:\/\//.test(b.location || "") ? b.location : null;
+  const pop = $("evpop");
+  pop.innerHTML = `
+    <button type="button" class="close" aria-label="Close">${ICON.x}</button>
+    <div class="eyebrow">${b.status === "pending" ? "Needs approval" : past ? "Past meeting" : "Meeting"}</div>
+    <div class="name">${escapeHtml(shortTitle(b))}</div>
+    <div class="row">${ICON.clock}<span>${escapeHtml(fmtLong.format(s))}, ${escapeHtml(fmtTime.format(s))} – ${escapeHtml(fmtTime.format(e))}</span></div>
+    ${(b.attendees || []).map((a) => `<div class="row">${ICON.person}<span>${escapeHtml(a.name || "")}${a.email ? ` · ${escapeHtml(a.email)}` : ""}</span></div>`).join("")}
+    ${b.location ? `<div class="row">${link ? ICON.video : ICON.pin}<span>${link ? "Video call" : escapeHtml(b.location)}</span></div>` : ""}
+    ${b.notes ? `<div class="row">${ICON.note}<span>${escapeHtml(b.notes)}</span></div>` : ""}
+    ${past ? "" : `<div class="acts">
+      ${link ? `<a class="act join" href="${escapeHtml(link)}" target="_blank" rel="noopener">${ICON.video}Join</a>` : ""}
+      <button type="button" class="act" data-act="move">${ICON.move}Move</button>
+      <button type="button" class="act danger" data-act="cancel">${ICON.x}Cancel</button>
+    </div>`}`;
+  pop.hidden = false;
+  // Place next to the meeting, inside the calendar panel.
+  const box = $("calview").getBoundingClientRect(), r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  let left = r.right - box.left + 8;
+  if (left + w > box.width - 12) left = r.left - box.left - w - 8;
+  pop.style.left = `${Math.max(12, Math.min(left, box.width - w - 12))}px`;
+  pop.style.top = `${Math.max(12, Math.min(r.top - box.top, box.height - h - 12))}px`;
+  pop.querySelector(".close").onclick = closeEvent;
+  pop.querySelectorAll("[data-act]").forEach((btn) => (btn.onclick = () => {
+    const p = phrase(b);
+    showView("chat");
+    send(btn.dataset.act === "move" ? `Move my ${p.label} to another time` : `Cancel my ${p.label}`);
+  }));
+}
+function closeEvent() { $("evpop").hidden = true; }
+
+function showView(v) {
+  document.querySelector(".app").classList.toggle("cal-on", v === "cal");
+  $("calview").hidden = v !== "cal";
+  document.querySelectorAll("button[data-view]").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
+  if (v === "cal") calLoad(); else { closeEvent(); drawMini(); input.focus(); }
+}
+function calShift(dir) {
+  const d = cal.date;
+  cal.date = cal.view === "month" ? new Date(d.getFullYear(), d.getMonth() + dir, 1) : addDays(d, dir * (cal.view === "week" ? 7 : 1));
+  calLoad();
+}
+
+document.querySelectorAll("button[data-view]").forEach((b) => (b.onclick = () => showView(b.dataset.view)));
+$("cal-today").onclick = () => { cal.date = startOfDay(new Date()); calLoad(); };
+$("cal-prev").onclick = () => calShift(-1);
+$("cal-next").onclick = () => calShift(1);
+$("cal-views").onclick = (e) => { const v = e.target.closest("[data-v]")?.dataset.v; if (v) { cal.view = v; calLoad(); } };
+$("cal-body").onclick = (e) => {
+  const ev = e.target.closest("[data-uid]");
+  if (ev) return openEvent(ev.dataset.uid, ev);
+  closeEvent();
+  const day = e.target.closest(".mcell, .tl-day")?.dataset.day;
+  if (day) { cal.view = "day"; cal.date = new Date(`${day}T00:00`); return calLoad(); }
+  const col = e.target.closest(".tl-col");
+  if (col) {  // empty time: start a booking request in the composer, for the user to finish
+    const mins = cal.h0 * 60 + Math.floor((e.clientY - col.getBoundingClientRect().top) / HOUR_PX * 2) * 30;
+    const at = new Date(`${col.dataset.day}T00:00`);
+    at.setMinutes(mins);
+    showView("chat");
+    input.value = `Book a meeting on ${fmtLong.format(at)} at ${fmtTime.format(at)} with `;
+    autosize();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+};
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeEvent(); });
+$("mini-grid").onclick = (e) => {
+  const day = e.target.closest("[data-day]")?.dataset.day;
+  if (day) { cal.view = "day"; cal.date = new Date(`${day}T00:00`); showView("cal"); }
+};
+$("mini-prev").onclick = () => { mini.month = new Date(mini.month.getFullYear(), mini.month.getMonth() - 1, 1); drawMini(); };
+$("mini-next").onclick = () => { mini.month = new Date(mini.month.getFullYear(), mini.month.getMonth() + 1, 1); drawMini(); };
+drawMini();
 
 // ================= Wiring =================
 function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; refreshSend(); }

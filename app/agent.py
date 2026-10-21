@@ -23,7 +23,6 @@ from calcom_mcp import timeutil as tu
 log = logging.getLogger("agent")
 
 MAX_ROUNDS = 8
-CHOICES_RE = re.compile(r"\n*\[\[([^\]]+)\]\]\s*$")
 YES_RE = re.compile(
     r"^\s*(y|yes|yep|yeah|yup|sure|ok|okay|confirm(ed)?|do it|go ahead|book it|sounds good|perfect|please do)\b[\s.!]*$",
     re.IGNORECASE,
@@ -31,28 +30,69 @@ YES_RE = re.compile(
 
 SYSTEM_PROMPT = """\
 You are the scheduling assistant for a busy founder who runs their day out of cal.com. They type short, casual \
-requests; you handle them like a sharp executive assistant.
+requests; you handle them like a sharp chief of staff: fast, exact, no fuss.
 
 How you work:
-- Be brief and warm. Plain sentences, light markdown (bold for times, short lists). No filler, no restating the request.
-- Use tools for every fact. Never invent times, availability, event types, or booking uids. Only offer times that \
-find_available_slots returned, and pass their `start` value through unchanged.
-- Ask only for what you truly need, all in one message. A new booking needs the attendee's name and email plus a time. \
+- Use tools for every fact. Never invent times, availability, event types, or booking uids.
+- Results from earlier messages in the conversation may be stale (the user can change things in cal.com any time): \
+fetch again for a new request, and before saying something isn't possible. Within one request, use what you just \
+fetched; never repeat a call with the same arguments.
+- Ask only for what you truly need, all in one message. A new booking needs the attendee's name and email plus a time; \
+the length defaults to the event type's, so don't ask about it unless the user brought it up. \
 Pick the event type yourself when the request makes it clear (e.g. "30-min intro"); ask only if it's ambiguous.
+- For a length no fixed event type has (e.g. 90 min), use an event type whose duration_options include it, \
+including hidden ones, and pass duration_minutes. If none offers it, say which lengths are available.
 - Resolve relative dates ("tomorrow", "Thursday afternoon", "later today") with the date table in the latest <context> \
 note. Use part_of_day for morning/afternoon/evening, and after_time for "later today".
-- Offer 2–4 well-spread options, not a dump. If nothing fits, say so and suggest the nearest alternative.
+- Offer times only once you know the day and the meeting length. If no specific day was given ("book a call with \
+Sam", "sometime this week"), don't search or offer times yet: ask which day, with the next few workdays as replies \
+(e.g. "Tomorrow", "Thu Oct 22"). If the length is unclear ("a quick call") and event types offer more than one fitting \
+length, ask for it too, with the lengths as replies ("15 min", "30 min"). A stated length ("30-min call") or a single \
+fitting event type counts as known. Ask for everything missing in one message.
+- Once the day and length are known, search that day (or the part of day given) in one find_available_slots call \
+and suggest 2–4 times; the app shows every open time on that day.
 - When the user refers to an existing meeting ("my 3pm", "the intro with Jordan"), call list_bookings for that day. \
 If more than one matches, ask which one.
-- Changes (create, reschedule, cancel): once you have everything, call the tool directly. The app shows the user a \
-confirmation card and only runs the action after they click Confirm — so don't ask "shall I book it?" in text. Say one \
-short line before the call, like "Here's the booking — confirm below."
+- Name every new meeting (create_booking `title`): use the name the user gave, otherwise a short one from the \
+conversation, like "Intro call with Andy" or "Investor sync". Don't ask for a name.
+- Changes (create, reschedule, cancel): once you have everything, call the tool directly. The app shows a confirmation \
+card and only runs the action after the user clicks Confirm, so never ask "shall I book it?".
 - If a tool result says the user declined or didn't confirm, acknowledge briefly and don't retry unless asked.
 - Rescheduling gives the booking a NEW uid. Use the new uid for any follow-up.
-- Show times in the user's timezone, with the zone abbreviation on first mention.
-- When the user needs to pick between options, end your message with one line in exactly this format: \
-[[option 1 | option 2 | option 3]] — short, clickable replies such as [[Thu 2:00 PM | Thu 3:30 PM | Another day]].
+
+How you answer: your final reply is JSON that the app renders.
+- message: the answer in one or two short sentences, in plain words. Lead with the answer. No greetings, no "Good \
+news", no apologies, no commentary on earlier replies or on what you checked, no restating the request. Never list \
+times or meetings in the message; put them in `times` and `meetings`, which the app shows as a time picker and cards.
+- times: once the day and length are settled, 2–4 slot `start` values (exactly as find_available_slots returned \
+them) you'd suggest on that day. The app also shows every other open time that day. Empty otherwise.
+- meetings: uids of the bookings the user asked about, in time order. Empty otherwise.
+- replies: up to 5 short follow-ups the user is likely to tap next, e.g. "Another day", "Make it 30 min", or the days \
+and lengths you're asking about ("Tomorrow", "Thu Oct 22", "Fri Oct 23", "15 min", "30 min"). Don't repeat the \
+offered times. Empty if nothing fits.
+
+Examples:
+- "anything tomorrow?" -> message "Two meetings tomorrow, first at 10:00 AM.", meetings [uid1, uid2].
+- "find 90 min with Jordan thursday afternoon" -> message "Three 90-minute openings Thursday afternoon. Which works, \
+and what's Jordan's email?", times [three starts], replies ["Another day"].
+- Clear calendar -> message "Nothing on Thursday.", replies ["Book something Thursday"].
 """
+
+# Structured outputs: the model's final text is always this JSON, which the app renders.
+REPLY_FORMAT = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "message": {"type": "string"},
+            "times": {"type": "array", "items": {"type": "string"}},
+            "meetings": {"type": "array", "items": {"type": "string"}},
+            "replies": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["message", "times", "meetings", "replies"],
+        "additionalProperties": False,
+    },
+}
 
 
 @dataclass
@@ -71,12 +111,16 @@ class Session:
     pending: PendingAction | None = None
     bookings: dict[str, dict[str, Any]] = field(default_factory=dict)  # uid -> compact booking
     event_types: dict[int, dict[str, Any]] = field(default_factory=dict)
+    slots: set[str] = field(default_factory=set)  # every slot start cal.com returned; the only times we show
+    offered: list[str] = field(default_factory=list)  # all open starts found while answering the current request
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 @dataclass
 class Turn:
     reply: str
+    times: list[dict[str, Any]] = field(default_factory=list)  # {start, day, time, suggested} for the time picker
+    meetings: list[dict[str, Any]] = field(default_factory=list)  # compact bookings for meeting cards
     suggestions: list[str] = field(default_factory=list)
     pending_action: dict[str, Any] | None = None
     calendar_changed: bool = False
@@ -84,6 +128,8 @@ class Turn:
     def to_dict(self) -> dict[str, Any]:
         return {
             "reply": self.reply,
+            "times": self.times,
+            "meetings": self.meetings,
             "suggestions": self.suggestions,
             "pending_action": self.pending_action,
             "calendar_changed": self.calendar_changed,
@@ -156,6 +202,8 @@ class Agent:
 
     async def _run(self, session: Session) -> Turn:
         system = [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+        seen: set[str] = set()  # read-only calls made for this request
+        session.offered = []
         for _ in range(MAX_ROUNDS):
             response = await self.llm.create(system=system, tools=self.tools, messages=session.messages)
             # Append the full content (thinking, text, tool_use blocks) unchanged — history stays append-only.
@@ -166,12 +214,12 @@ class Agent:
                 return Turn(reply="Sorry — I can't help with that one. Anything on your calendar I can do instead?")
             if response.stop_reason != "tool_use":
                 if response.stop_reason == "max_tokens":
-                    text += "\n\n_(Response cut short — ask me to continue.)_"
-                return self._final(text)
+                    return Turn(reply="That answer ran long and got cut off. Could you ask for a bit less at once?")
+                return self._final(session, text)
 
             calls = [b for b in response.content if b.type == "tool_use"]
             gated = [c for c in calls if c.name in self.gated]
-            ready = await asyncio.gather(*(self._execute(session, c) for c in calls if c.name not in self.gated))
+            ready = await asyncio.gather(*(self._read(session, c, seen) for c in calls if c.name not in self.gated))
             if gated:
                 pending = PendingAction(
                     id=uuid.uuid4().hex[:12],
@@ -180,20 +228,59 @@ class Agent:
                     items=[self._describe(session, c) for c in gated],
                 )
                 session.pending = pending
-                turn = self._final(text or "Please confirm:")
+                turn = self._final(session, text)
                 turn.pending_action = {"id": pending.id, "items": pending.items}
                 return turn
             session.messages.append({"role": "user", "content": list(ready)})
 
-        return Turn(reply="I got stuck working on that — could you rephrase or break it into steps?")
+        # Out of rounds: answer from what was gathered (tools off) rather than give up.
+        response = await self.llm.create(
+            system=system, tools=self.tools, messages=session.messages, tool_choice={"type": "none"}
+        )
+        session.messages.append({"role": "assistant", "content": response.content})
+        text = "".join(b.text for b in response.content if b.type == "text").strip()
+        if response.stop_reason != "end_turn" or not text:
+            return Turn(reply="I couldn't finish that one. Could you narrow it down, e.g. one day or one person?")
+        return self._final(session, text)
 
-    def _final(self, text: str) -> Turn:
-        suggestions: list[str] = []
-        match = CHOICES_RE.search(text)
-        if match:
-            suggestions = [s.strip() for s in match.group(1).split("|") if s.strip()][:5]
-            text = text[: match.start()].rstrip()
-        return Turn(reply=text, suggestions=suggestions)
+    def _final(self, session: Session, text: str) -> Turn:
+        """Turn the model's JSON reply into what the UI renders, keeping only times and meetings cal.com returned."""
+        try:
+            data = json.loads(text) if text else {}
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            return Turn(reply=text)  # plain text, e.g. a short line before a confirmation card
+        tz = tu.zone(session.timezone)
+        picks = []
+        for raw in data.get("times") or []:
+            try:
+                start = tu.to_utc_z(tu.parse_iso(raw))
+            except (TypeError, ValueError):
+                continue
+            if start in session.slots and start not in picks:
+                picks.append(start)
+        # When the suggestions are on one day, show every open time that day with them highlighted;
+        # across several days the day isn't settled yet, so show just the suggestions.
+        day_of = lambda s: tu.parse_iso(s).astimezone(tz).date()
+        days = {day_of(p) for p in picks}
+        shown = sorted(set(picks) | {s for s in session.offered if day_of(s) in days}) if len(days) == 1 else sorted(picks)
+        times = []
+        for start in shown:
+            local = tu.parse_iso(start).astimezone(tz)
+            times.append({"start": start, "day": tu.fmt_day(local), "time": tu.fmt_time(local), "suggested": start in picks})
+        meetings = [session.bookings[uid] for uid in data.get("meetings") or [] if uid in session.bookings]
+        replies = [r.strip() for r in data.get("replies") or [] if r.strip()][:5]
+        return Turn(reply=(data.get("message") or "").strip(), times=times, meetings=meetings, suggestions=replies)
+
+    async def _read(self, session: Session, call: Any, seen: set[str]) -> dict[str, Any]:
+        """Run a read-only tool, but don't let the model re-run an identical lookup in a loop."""
+        key = call.name + json.dumps(call.input, sort_keys=True)
+        if key in seen:
+            return {"type": "tool_result", "tool_use_id": call.id, "is_error": True,
+                    "content": "You already made this exact call for this request; use that result and answer."}
+        seen.add(key)
+        return await self._execute(session, call)
 
     async def _execute(self, session: Session, call: Any, audit: bool = False) -> dict[str, Any]:
         try:
@@ -215,7 +302,7 @@ class Agent:
         return {"type": "tool_result", "tool_use_id": call.id, "content": payload, "is_error": bool(result.is_error)}
 
     def _remember(self, session: Session, data: dict[str, Any]) -> None:
-        """Cache bookings and event types so confirmation cards can say what's being changed."""
+        """Cache bookings, event types and offered slots, for confirmation cards and to validate the reply."""
         for b in data.get("bookings") or []:
             session.bookings[b["uid"]] = b
         for key in ("booked", "rescheduled"):
@@ -223,6 +310,10 @@ class Agent:
                 session.bookings[data[key]["uid"]] = data[key]
         for et in data.get("event_types") or []:
             session.event_types[et["id"]] = et
+        if "days" in data:  # a slot search
+            found = {slot["start"] for day in data["days"] for slot in day.get("slots") or []}
+            session.slots.update(found)
+            session.offered = sorted(set(session.offered) | found)
 
     def _describe(self, session: Session, call: Any) -> dict[str, str]:
         args = call.input or {}
@@ -236,12 +327,19 @@ class Agent:
 
         if call.name == "create_booking":
             et = session.event_types.get(args.get("event_type_id"), {})
-            return {
+            guests = len(args.get("guests") or [])
+            item = {
                 "action": "Book",
-                "title": et.get("title") or "New meeting",
+                "title": args.get("title") or et.get("title") or "New meeting",
                 "when": when(args.get("start")),
-                "detail": f"{args.get('attendee_name')} · {args.get('attendee_email')}",
+                "detail": f"{args.get('attendee_name')} · {args.get('attendee_email')}"
+                + (f" · +{guests} guest{'s' * (guests > 1)}" if guests else ""),
             }
+            if args.get("location"):
+                item["where"] = args.get("location_detail") or args["location"].replace("-", " ").title()
+            if args.get("allow_conflicts"):
+                item["warning"] = "Overlaps another meeting on your calendar"
+            return item
         booking = session.bookings.get(args.get("booking_uid"), {})
         title = booking.get("title") or f"Booking {args.get('booking_uid')}"
         if call.name == "reschedule_booking":

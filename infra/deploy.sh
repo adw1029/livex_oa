@@ -19,5 +19,8 @@ sam deploy --template-file infra/template.yaml --stack-name "$STACK" --resolve-s
 
 out() { aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 aws s3 sync app/static "s3://$(out BucketName)" --delete
-aws cloudfront create-invalidation --distribution-id "$(out DistributionId)" --paths '/*' --query Invalidation.Id --output text
+DIST="$(out DistributionId)"
+INVALIDATION=$(aws cloudfront create-invalidation --distribution-id "$DIST" --paths '/*' --query Invalidation.Id --output text)
+echo "Waiting for CloudFront to serve the new UI..."
+aws cloudfront wait invalidation-completed --distribution-id "$DIST" --id "$INVALIDATION"
 echo "Live at: $(out Url)"

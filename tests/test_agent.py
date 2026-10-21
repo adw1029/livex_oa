@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from mcp import Client
 
@@ -9,7 +11,7 @@ from app import sessions
 from app.agent import Agent, Session
 from calcom_mcp import timeutil as tu
 from calcom_mcp.server import create_server
-from tests.fakes import FakeCal, ScriptedLLM, call, next_weekday, reply
+from tests.fakes import FakeCal, ScriptedLLM, answer, call, next_weekday, reply
 
 pytestmark = pytest.mark.anyio
 
@@ -37,7 +39,7 @@ async def make_agent(mcp, *script):
 def book_call(cal: FakeCal, hh: int = 14):
     return call(
         "create_booking",
-        {"event_type_id": 1, "start": tu.to_utc_z(cal.at(hh)), "attendee_name": "Jordan Lee",
+        {"event_type_id": 1, "start": tu.to_utc_z(cal.at(hh)), "title": "Intro call with Jordan", "attendee_name": "Jordan Lee",
          "attendee_email": "jordan@example.com", "attendee_timezone": TZ},
         text="Here's the booking — confirm below.",
     )
@@ -52,18 +54,33 @@ async def test_gate_set_comes_from_annotations(mcp):
     assert agent.gated == {"create_booking", "reschedule_booking", "cancel_booking"}
 
 
-async def test_read_only_tools_run_immediately_and_choices_become_chips(mcp, cal):
-    cal.seed("Intro with Sam", cal.at(15))
+async def test_read_only_tools_run_immediately_and_meetings_become_cards(mcp, cal):
+    uid = cal.seed("Intro with Sam", cal.at(15))
     agent, llm = await make_agent(
         mcp,
         call("list_bookings", {"timezone": TZ, "date_from": cal.day.isoformat()}),
-        reply("You have **Intro with Sam** at 3:00 PM.\n\n[[Move it | Cancel it]]"),
+        answer("One meeting Thursday.", meetings=[uid, "made-up-uid"], replies=["Move it", "Cancel it"]),
     )
-    turn = await agent.chat(Session("s"), "what's on thursday?", TZ)
-    assert turn.reply == "You have **Intro with Sam** at 3:00 PM."
+    turn = await agent.chat(Session("s", timezone=TZ), "what's on thursday?", TZ)
+    assert turn.reply == "One meeting Thursday."
+    assert [m["title"] for m in turn.meetings] == ["Intro with Sam"]  # unknown uids are dropped
     assert turn.suggestions == ["Move it", "Cancel it"]
     assert turn.pending_action is None
     assert "Intro with Sam" in tool_results(llm.seen[1][-1])["tu_list_bookings"]["content"]
+
+
+async def test_only_times_cal_com_returned_reach_the_time_picker(mcp, cal):
+    real, invented = tu.to_utc_z(cal.at(14)), tu.to_utc_z(cal.at(14, 15))
+    agent, _ = await make_agent(
+        mcp,
+        call("find_available_slots", {"event_type_id": 1, "date_from": cal.day.isoformat(), "timezone": TZ, "part_of_day": "afternoon"}),
+        answer("Two openings Thursday afternoon.", times=[real, invented]),
+    )
+    turn = await agent.chat(Session("s", timezone=TZ), "thursday afternoon?", TZ)
+    # Every open afternoon time is shown (12:00–4:30, half-hourly); only the real suggestion is highlighted.
+    assert [t["time"] for t in turn.times][:2] == ["12:00 PM", "12:30 PM"] and len(turn.times) == 10
+    assert [t["start"] for t in turn.times if t["suggested"]] == [real]
+    assert invented not in [t["start"] for t in turn.times]
 
 
 async def test_write_waits_for_confirm_then_executes(mcp, cal):
@@ -162,3 +179,36 @@ async def test_every_tool_use_gets_a_result(mcp, cal):
             ids = [b.id for b in m["content"] if b.type == "tool_use"]
             if ids:
                 assert set(ids) <= set(tool_results(msgs[i + 1]))
+
+
+async def test_identical_lookup_is_not_repeated_within_a_request(mcp, cal):
+    args = {"event_type_id": 1, "date_from": cal.day.isoformat(), "timezone": TZ}
+    agent, llm = await make_agent(
+        mcp, call("find_available_slots", args, call_id="a"), call("find_available_slots", args, call_id="b"), answer("Done."),
+    )
+    await agent.chat(Session("s", timezone=TZ), "thursday?", TZ)
+    assert len([c for c in cal.calls if c[0] == "get_slots"]) == 1
+    assert "already made this exact call" in tool_results(llm.seen[2][-1])["b"]["content"]
+
+
+async def test_out_of_rounds_answers_with_tools_off(mcp, cal):
+    from app.agent import MAX_ROUNDS
+    lookups = [call("list_bookings", {"timezone": TZ, "date_from": cal.day.isoformat(), "attendee_name": f"x{i}"}, call_id=f"c{i}")
+               for i in range(MAX_ROUNDS)]
+    agent, llm = await make_agent(mcp, *lookups, answer("Nothing on Thursday."))
+    turn = await agent.chat(Session("s", timezone=TZ), "thursday?", TZ)
+    assert turn.reply == "Nothing on Thursday."
+    assert llm.tool_choices[-1] == {"type": "none"} and llm.tool_choices[0] is None
+
+
+async def test_suggestions_across_days_show_without_full_day_table(mcp, cal):
+    thu, fri = cal.at(14), cal.at(14) + timedelta(days=1)
+    cal.open.add(fri)
+    agent, _ = await make_agent(
+        mcp,
+        call("find_available_slots", {"event_type_id": 1, "date_from": cal.day.isoformat(),
+                                      "date_to": fri.date().isoformat(), "timezone": TZ}),
+        answer("Thursday or Friday?", times=[tu.to_utc_z(thu), tu.to_utc_z(fri)]),
+    )
+    turn = await agent.chat(Session("s", timezone=TZ), "this week?", TZ)
+    assert [t["start"] for t in turn.times] == [tu.to_utc_z(thu), tu.to_utc_z(fri)]

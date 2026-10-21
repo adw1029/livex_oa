@@ -124,19 +124,21 @@ async def reset(body: dict):
 
 
 @app.get("/api/agenda")
-async def agenda(timezone: str = "UTC", days: int = 14):
-    """Upcoming schedule for the sidebar — read straight from the MCP server, no LLM involved."""
+async def agenda(timezone: str = "UTC", days: int = 14, start: str | None = None, end: str | None = None):
+    """Meetings for the sidebar (next `days`) or the calendar view (`start`..`end`, local dates). No LLM involved."""
     try:
-        today = datetime.now(tu.zone(timezone)).date()
+        first = tu.parse_date(start) if start else datetime.now(tu.zone(timezone)).date()
+        last = tu.parse_date(end) if end else first + timedelta(days=max(1, min(days, 31)) - 1)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if not first <= last <= first + timedelta(days=62):
+        raise HTTPException(400, "Pick a date range of at most two months.")
     mcp = app.state.agent.mcp
     if getattr(app.state, "profile", None) is None:
         me = await mcp.call_tool("get_profile", {})
         app.state.profile = me.structured_content if not me.is_error else {}
     result = await mcp.call_tool(
-        "list_bookings",
-        {"timezone": timezone, "date_from": today.isoformat(), "date_to": (today + timedelta(days=max(1, min(days, 31)) - 1)).isoformat()},
+        "list_bookings", {"timezone": timezone, "date_from": first.isoformat(), "date_to": last.isoformat()}
     )
     if result.is_error:
         raise HTTPException(502, "Couldn't load your calendar from cal.com.")

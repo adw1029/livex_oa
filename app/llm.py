@@ -6,6 +6,7 @@ from typing import Any
 
 from anthropic import AsyncAnthropic, AsyncAnthropicBedrockMantle
 
+from app.agent import REPLY_FORMAT
 from app.config import Settings
 
 
@@ -21,12 +22,17 @@ class LLM:
         else:
             raise ValueError(f"LLM_PROVIDER must be 'anthropic' or 'bedrock', got {self.provider!r}")
 
-    async def create(self, *, system: Any, tools: list[dict[str, Any]], messages: list[dict[str, Any]]) -> Any:
+    async def create(
+        self, *, system: Any, tools: list[dict[str, Any]], messages: list[dict[str, Any]], tool_choice: dict[str, str] | None = None
+    ) -> Any:
+        extra = {"tool_choice": tool_choice} if tool_choice else {}
         return await self.client.messages.create(
+            **extra,
             model=self.model,
             max_tokens=16000,
             system=system,
             tools=tools,
             messages=messages,
-            output_config={"effort": self.effort},
+            # The final reply is JSON in REPLY_FORMAT; tool calls are unaffected.
+            output_config={"effort": self.effort, "format": REPLY_FORMAT},
         )
