@@ -45,6 +45,9 @@ Browser ──▶ CloudFront ──┬─ /*     ─▶ S3 (chat UI)
 Claude decides which tools to call. The MCP server talks to cal.com, through 8 tools: 4 that read and 4 that make
 changes.
 
+The [dev plan](docs/dev-plan.md) has the full design, with diagrams of a chat turn, the confirmation gate, time
+handling, the build plan and the test layers.
+
 ## Design decisions
 
 - **The confirmation step is enforced in code, not the prompt.** When Claude calls a tool that changes the calendar,
