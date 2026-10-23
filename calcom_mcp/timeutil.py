@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Local-time windows for vague requests like "Thursday afternoon".
@@ -25,11 +25,11 @@ def parse_iso(value: str) -> datetime:
     if not isinstance(value, str):
         raise TypeError(f"Expected an ISO timestamp, got {value!r}")
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def to_utc_z(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def parse_date(value: str) -> date:
@@ -74,7 +74,7 @@ def fmt_range(start: datetime, end: datetime, tz: ZoneInfo) -> str:
 def time_context(tz_name: str, now: datetime | None = None, days: int = 14) -> str:
     """A compact 'what day is it' note so the model resolves 'Thursday' or 'tomorrow' without guessing."""
     tz = zone(tz_name)
-    now = (now or datetime.now(timezone.utc)).astimezone(tz)
+    now = (now or datetime.now(UTC)).astimezone(tz)
     rows = []
     for i in range(days):
         d = (now + timedelta(days=i)).date()

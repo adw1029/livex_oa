@@ -28,11 +28,25 @@ class FakeCal:
     def __init__(self, day: date):
         self.day = day
         self.event_types = [
-            {"id": 1, "title": "30 Min Intro", "slug": "intro", "lengthInMinutes": 30,
-             "locations": [{"type": "integration", "integration": "cal-video"}]},
-            {"id": 2, "title": "Office Hours", "slug": "office-hours", "lengthInMinutes": 30, "lengthInMinutesOptions": [15, 30, 60],
-             "locations": [{"type": "integration", "integration": "zoom"}, {"type": "address", "address": "1 Market St"},
-                           {"type": "attendeeDefined"}]},
+            {
+                "id": 1,
+                "title": "30 Min Intro",
+                "slug": "intro",
+                "lengthInMinutes": 30,
+                "locations": [{"type": "integration", "integration": "cal-video"}],
+            },
+            {
+                "id": 2,
+                "title": "Office Hours",
+                "slug": "office-hours",
+                "lengthInMinutes": 30,
+                "lengthInMinutesOptions": [15, 30, 60],
+                "locations": [
+                    {"type": "integration", "integration": "zoom"},
+                    {"type": "address", "address": "1 Market St"},
+                    {"type": "attendeeDefined"},
+                ],
+            },
         ]
         self.bookings: dict[str, dict[str, Any]] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -51,8 +65,17 @@ class FakeCal:
         self.bookings[uid] = self._booking(uid, title, start, attendee)
         return uid
 
-    def _booking(self, uid: str, title: str, start: datetime, attendee: str, status: str = "accepted",
-                 event_type: dict[str, Any] | None = None, email: str | None = None, minutes: int = 30) -> dict[str, Any]:
+    def _booking(
+        self,
+        uid: str,
+        title: str,
+        start: datetime,
+        attendee: str,
+        status: str = "accepted",
+        event_type: dict[str, Any] | None = None,
+        email: str | None = None,
+        minutes: int = 30,
+    ) -> dict[str, Any]:
         return {
             "uid": uid,
             "title": title,
@@ -61,7 +84,13 @@ class FakeCal:
             "end": tu.to_utc_z(start + timedelta(minutes=minutes)),
             "duration": minutes,
             "eventType": event_type or {"id": 1, "slug": "intro"},
-            "attendees": [{"name": attendee, "email": email or f"{attendee.split()[0].lower()}@example.com", "timeZone": "America/Los_Angeles"}],
+            "attendees": [
+                {
+                    "name": attendee,
+                    "email": email or f"{attendee.split()[0].lower()}@example.com",
+                    "timeZone": "America/Los_Angeles",
+                }
+            ],
             "location": "https://cal.com/video/x",
         }
 
@@ -82,7 +111,9 @@ class FakeCal:
         self.event_types = [et for et in self.event_types if et["id"] != event_type_id]
 
     async def get_slots(self, *, event_type_id, start, end, time_zone, duration=None, booking_uid_to_reschedule=None):
-        self.calls.append(("get_slots", {"start": start, "end": end, "duration": duration, "reschedule": booking_uid_to_reschedule}))
+        self.calls.append(
+            ("get_slots", {"start": start, "end": end, "duration": duration, "reschedule": booking_uid_to_reschedule})
+        )
         length = timedelta(minutes=duration or 30)
         lo, hi, tz = tu.parse_iso(start), tu.parse_iso(end), ZoneInfo(time_zone)
         open_ = set(self.open)
@@ -97,9 +128,20 @@ class FakeCal:
             )
         return out
 
-    async def list_bookings(self, *, status=None, after_start=None, before_end=None, attendee_name=None,
-                            attendee_email=None, event_type_id=None, booking_uid=None):
-        self.calls.append(("list_bookings", {"status": status, "attendee_email": attendee_email, "event_type_id": event_type_id}))
+    async def list_bookings(
+        self,
+        *,
+        status=None,
+        after_start=None,
+        before_end=None,
+        attendee_name=None,
+        attendee_email=None,
+        event_type_id=None,
+        booking_uid=None,
+    ):
+        self.calls.append(
+            ("list_bookings", {"status": status, "attendee_email": attendee_email, "event_type_id": event_type_id})
+        )
         items = list(self.bookings.values())
         if attendee_email:
             items = [b for b in items if any(a["email"] == attendee_email for a in b["attendees"])]
@@ -117,10 +159,31 @@ class FakeCal:
             items = [b for b in items if b["status"] == "cancelled"]
         return items
 
-    async def create_booking(self, *, event_type_id, start, attendee, length_in_minutes=None, location=None,
-                             guests=None, notes=None, allow_conflicts=False):
-        self.calls.append(("create_booking", {"start": start, "attendee": attendee, "length_in_minutes": length_in_minutes,
-                                              "location": location, "guests": guests, "allow_conflicts": allow_conflicts}))
+    async def create_booking(
+        self,
+        *,
+        event_type_id,
+        start,
+        attendee,
+        length_in_minutes=None,
+        location=None,
+        guests=None,
+        notes=None,
+        allow_conflicts=False,
+    ):
+        self.calls.append(
+            (
+                "create_booking",
+                {
+                    "start": start,
+                    "attendee": attendee,
+                    "length_in_minutes": length_in_minutes,
+                    "location": location,
+                    "guests": guests,
+                    "allow_conflicts": allow_conflicts,
+                },
+            )
+        )
         begin = tu.parse_iso(start)
         if begin not in self.open and not allow_conflicts:
             raise CalComError(400, "User either already has booking at this time or is not available")
@@ -128,14 +191,29 @@ class FakeCal:
         uid = next(self._uids)
         et = next(e for e in self.event_types if e["id"] == event_type_id)
         # Like cal.com: the title comes from the event type's name template.
-        title = et["title"] if et.get("customName") == "{Event type title}" else f"{et['title']} between Founder and {attendee['name']}"
+        title = (
+            et["title"]
+            if et.get("customName") == "{Event type title}"
+            else f"{et['title']} between Founder and {attendee['name']}"
+        )
         # Like cal.com: the booking records how it was booked in bookingFieldsResponses.
         where = location or {"type": "integration", "integration": "cal-video"}
         detail = next((v for k, v in where.items() if k in ("address", "location", "phone")), "")
-        value = "integrations:daily" if where.get("integration") == "cal-video" else where.get("integration") or where["type"]
+        value = (
+            "integrations:daily"
+            if where.get("integration") == "cal-video"
+            else where.get("integration") or where["type"]
+        )
         self.bookings[uid] = {
-            **self._booking(uid, title, begin, attendee["name"], event_type={"id": et["id"], "slug": et.get("slug")},
-                            email=attendee["email"], minutes=et.get("lengthInMinutes") or 30),
+            **self._booking(
+                uid,
+                title,
+                begin,
+                attendee["name"],
+                event_type={"id": et["id"], "slug": et.get("slug")},
+                email=attendee["email"],
+                minutes=et.get("lengthInMinutes") or 30,
+            ),
             "guests": guests,
             "bookingFieldsResponses": {"notes": notes, "location": {"value": value, "optionValue": detail}},
         }
@@ -150,8 +228,10 @@ class FakeCal:
         self.open.add(tu.parse_iso(old["start"]))
         begin = tu.parse_iso(start)
         self.open.discard(begin)
-        self.bookings[new_uid] = {**self._booking(new_uid, old["title"], begin, old["attendees"][0]["name"], event_type=old["eventType"]),
-                                  "rescheduledFromUid": uid}
+        self.bookings[new_uid] = {
+            **self._booking(new_uid, old["title"], begin, old["attendees"][0]["name"], event_type=old["eventType"]),
+            "rescheduledFromUid": uid,
+        }
         return self.bookings[new_uid]
 
     async def cancel_booking(self, uid, *, reason=None):
@@ -163,9 +243,13 @@ class FakeCal:
 
 # ---- scripted LLM --------------------------------------------------------------
 
+
 def reply(text: str) -> Message:
     return Message.model_construct(
-        id="msg", type="message", role="assistant", model="fake",
+        id="msg",
+        type="message",
+        role="assistant",
+        model="fake",
         content=[TextBlock.model_construct(type="text", text=text)],
         stop_reason="end_turn",
     )
@@ -173,7 +257,9 @@ def reply(text: str) -> Message:
 
 def answer(message: str, times=(), meetings=(), replies=()) -> Message:
     """A final reply in the app's structured JSON format."""
-    return reply(json.dumps({"message": message, "times": list(times), "meetings": list(meetings), "replies": list(replies)}))
+    return reply(
+        json.dumps({"message": message, "times": list(times), "meetings": list(meetings), "replies": list(replies)})
+    )
 
 
 def call(name: str, args: dict[str, Any], text: str = "", call_id: str | None = None) -> Message:

@@ -72,7 +72,8 @@ You need Python 3.11+, a [cal.com](https://cal.com) API key (Settings → Securi
 make install
 cp .env.example .env    # add CAL_API_KEY and ANTHROPIC_API_KEY
 make run                # http://localhost:8000
-make test               # 41 tests, no network or keys needed
+make test               # 42 tests, no network or keys needed
+make lint               # ruff check + format check
 ```
 
 To deploy your own copy, add `CAL_API_KEY`, `ANTHROPIC_API_KEY` and `ACCESS_PASSCODE` to SSM Parameter Store under

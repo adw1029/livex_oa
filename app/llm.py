@@ -1,4 +1,4 @@
-"""One `create()` call over either the Claude API or Amazon Bedrock — same Messages API, same code path."""
+"""One `create()` call over either the Claude API or Amazon Bedrock: same Messages API, same code path."""
 
 from __future__ import annotations
 
@@ -16,14 +16,21 @@ class LLM:
         self.model = settings.model
         self.effort = settings.effort
         if self.provider == "bedrock":
-            self.client: Any = AsyncAnthropicBedrockMantle(aws_region=settings.aws_region, aws_profile=settings.aws_profile)
+            self.client: Any = AsyncAnthropicBedrockMantle(
+                aws_region=settings.aws_region, aws_profile=settings.aws_profile
+            )
         elif self.provider == "anthropic":
             self.client = AsyncAnthropic()
         else:
             raise ValueError(f"LLM_PROVIDER must be 'anthropic' or 'bedrock', got {self.provider!r}")
 
     async def create(
-        self, *, system: Any, tools: list[dict[str, Any]], messages: list[dict[str, Any]], tool_choice: dict[str, str] | None = None
+        self,
+        *,
+        system: Any,
+        tools: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        tool_choice: dict[str, str] | None = None,
     ) -> Any:
         extra = {"tool_choice": tool_choice} if tool_choice else {}
         return await self.client.messages.create(

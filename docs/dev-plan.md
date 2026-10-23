@@ -9,7 +9,7 @@ language. It is live on AWS, and nothing changes on the calendar until the user 
 | **Goal** | Every request resolves in a few turns, with correct times and no made-up bookings |
 | **Hard rule** | Nothing changes on the calendar until the user clicks Confirm |
 | **Done when** | A reviewer clones the repo, adds two keys, runs `make run`, and the demo works against a real cal.com account |
-| **Status** | All five features shipped, live on AWS, 41 offline tests passing |
+| **Status** | All five features shipped, live on AWS, 42 offline tests passing |
 
 ## Scope
 
@@ -33,7 +33,7 @@ holds every write until Confirm, and the MCP server is the only part that calls 
 
 | Component | Choice | Why |
 |---|---|---|
-| Tools | Standalone MCP server wrapping cal.com v2 (`calcom_mcp/`) | Claude Desktop and Claude Code get the same tools and checks |
+| Tools | Standalone MCP server wrapping cal.com v2 (`calcom_mcp/`) | Any MCP client gets the same tools and checks |
 | Agent | Claude tool-use loop, capped at 8 rounds (`app/agent.py`) | Claude chooses tools; code decides what may run |
 | LLM | Claude Sonnet via the Anthropic API | Bedrock was blocked on the new account; `LLM_PROVIDER=bedrock` switches back |
 | Server | FastAPI on Lambda via Lambda Web Adapter | Same app on a laptop and on AWS |
@@ -46,7 +46,7 @@ holds every write until Confirm, and the MCP server is the only part that calls 
 app/          FastAPI routes, agent loop + confirmation gate, LLM client, sessions, single-page UI
 calcom_mcp/   cal.com v2 client, MCP server (8 tools + guards), timezone math
 infra/        SAM template (CloudFront, S3, Lambda, DynamoDB) and deploy script
-tests/        41 offline tests with a fake cal.com and a scripted Claude
+tests/        42 offline tests with a fake cal.com and a scripted Claude
 ```
 
 ## Key design decisions
@@ -90,7 +90,7 @@ fix or commit.
 
 | Test layer | What it covers |
 |---|---|
-| Offline pytest (41 tests, under 2 s) | Fake cal.com + scripted Claude: the gate, slot re-checks, timezone math, uid tracking, pagination |
+| Offline pytest (42 tests, under 2 s) | Fake cal.com + scripted Claude: the gate, slot re-checks, timezone math, uid tracking, pagination |
 | Live API probes | Real cal.com behaviour the docs don't spell out |
 | End-to-end runs | Book, list, update, move, cancel on the deployed API, then clean up |
 | Visual checks | Headless Chrome in light, dark and phone width |
@@ -102,7 +102,7 @@ fix or commit.
 | A write happens without consent | Gate enforced in code; MCP server re-checks every write |
 | The public URL can change a real calendar | Access code on the API; secrets only in SSM |
 | Bedrock blocked on the new AWS account | Anthropic API today; `LLM_PROVIDER=bedrock` switches back |
-| Lambda cold start (~10 s) | Warm the site up before a demo |
+| Lambda cold start (~5 s) | Hash-based .pyc and async init in the Lambda Web Adapter; warm the site up before a demo |
 
 ## Next steps
 

@@ -48,9 +48,6 @@ class CalClient:
             verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
         )
 
-    async def aclose(self) -> None:
-        await self._http.aclose()
-
     async def _request(
         self,
         method: str,
@@ -97,20 +94,23 @@ class CalClient:
         booking_uid_to_reschedule: str | None = None,
     ) -> dict[str, list[Any]]:
         """Returns {"YYYY-MM-DD": [{"start": ..., "end": ...}, ...]} for the range (UTC bounds)."""
-        return await self._request(
-            "GET",
-            "/slots",
-            version=V_SLOTS,
-            params={
-                "eventTypeId": event_type_id,
-                "start": start,
-                "end": end,
-                "timeZone": time_zone,
-                "duration": duration,
-                "bookingUidToReschedule": booking_uid_to_reschedule,
-                "format": "range",
-            },
-        ) or {}
+        return (
+            await self._request(
+                "GET",
+                "/slots",
+                version=V_SLOTS,
+                params={
+                    "eventTypeId": event_type_id,
+                    "start": start,
+                    "end": end,
+                    "timeZone": time_zone,
+                    "duration": duration,
+                    "bookingUidToReschedule": booking_uid_to_reschedule,
+                    "format": "range",
+                },
+            )
+            or {}
+        )
 
     async def list_bookings(
         self,

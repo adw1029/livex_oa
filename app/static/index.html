@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Doto:wght@700&family=Inter+Tight:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  /* Theme follows livex.ai: ink + off-white, LiveX blue, Neue-Montreal-style grotesk, dot-matrix eyebrows, pill buttons. */
+  /* Colors and type follow the livex.ai site. */
   :root {
     --ink: #050505;
     --paper: #f7f7f7;
@@ -64,7 +64,7 @@
   .eyebrow { font-family: var(--dot); font-weight: 700; font-size: 12.5px; line-height: 14px; text-transform: uppercase; letter-spacing: .06em; }
   .app { height: 100%; display: grid; grid-template-columns: 360px 1fr; }
 
-  /* ================= Sidebar (ink) ================= */
+  /* Sidebar */
   .side { background: var(--side-bg); color: var(--side-text); display: flex; flex-direction: column; min-height: 0; }
   .side-scroll { overflow-y: auto; flex: 1; padding: 28px 24px 16px; scrollbar-color: #333 transparent; }
   .today-head .dow { color: var(--blue-bright); }
@@ -154,7 +154,7 @@
   .skel { height: 54px; border-radius: 10px; margin-top: 12px; background: linear-gradient(90deg, #121214 0%, #1c1c20 50%, #121214 100%); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
   @keyframes shimmer { to { background-position: -200% 0; } }
 
-  /* ================= Chat (paper) ================= */
+  /* Chat */
   .chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .navbar {
     display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 28px;
@@ -254,7 +254,7 @@
   .card.done .actions { display: none; }
   .card.done .settled { display: flex; }
 
-  /* ================= Composer ================= */
+  /* Composer */
   .composer { padding: 8px 28px max(22px, env(safe-area-inset-bottom)); }
   .composer-inner { max-width: 760px; margin: 0 auto; }
   .suggest { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -282,7 +282,7 @@
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
   .toast svg { width: 16px; height: 16px; color: #ff7a7a; flex: none; }
 
-  /* ================= Calendar view ================= */
+  /* Calendar view */
   .seg { margin-left: auto; display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 300px; background: var(--surface); }
   .seg button { height: 30px; padding: 0 14px; border-radius: 300px; font-size: 14px; color: var(--text-2); transition: background .2s, color .2s; }
   .seg button:hover { color: var(--text); }
@@ -362,7 +362,7 @@
   .evpop .act.danger { color: var(--danger); }
   .evpop .act.danger:hover { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 
-  /* ================= Narrow screens ================= */
+  /* Narrow screens */
   @media (max-width: 900px) {
     .app { display: flex; flex-direction: column; }
     .chat { display: contents; }
@@ -400,7 +400,7 @@
     .mev .tx { display: none; }
     .tl { --gutter: 44px; }
   }
-  /* ================= Passcode gate (hosted only) ================= */
+  /* Passcode gate (hosted only) */
   .gate { position: fixed; inset: 0; z-index: 30; display: none; place-items: center; padding: 16px; background: var(--side-bg); }
   .gate.show { display: grid; }
   .gate form { width: min(380px, 100%); flex-direction: column; align-items: stretch; gap: 14px; padding: 28px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
@@ -485,7 +485,7 @@
         <div class="welcome" id="welcome">
           <div class="eyebrow">Scheduling on cal.com</div>
           <h1 id="greeting">Hello.</h1>
-          <p id="welcome-sub">Book, move, or cancel meetings — just say it.</p>
+          <p id="welcome-sub">Book, move or cancel meetings in plain language.</p>
         </div>
       </div>
     </main>
@@ -552,7 +552,7 @@ let sessionId = storage(() => sessionStorage.getItem("sid"), null) || newId();
 storage(() => sessionStorage.setItem("sid", sessionId));
 let busy = false, started = false, agenda = [], profile = {};
 
-// ================= Header =================
+// Header
 (function header() {
   const now = new Date();
   // Zone ids are named after one city ("America/Los_Angeles"), so prefer the region's name: "Pacific Time".
@@ -574,7 +574,7 @@ function greet() {
   $("greeting").textContent = first ? `${part}, ${first}.` : `${part}.`;
 }
 
-// ================= Agenda =================
+// Agenda
 const dayKey = (d) => d.toLocaleDateString("en-CA");
 function dayLabel(d) {
   const today = new Date(), tomorrow = new Date(Date.now() + 864e5);
@@ -692,10 +692,10 @@ function suggest() {
   box.querySelectorAll("button").forEach((b) => (b.onclick = () => send(b.textContent)));
   $("welcome-sub").textContent = next
     ? `Next up: ${shortTitle(next)}${who(next) ? " with " + who(next) : ""} · ${relative(new Date(next.start), new Date(next.end)).text}`
-    : "Book, move, or cancel meetings — just say it.";
+    : "Book, move or cancel meetings in plain language.";
 }
 
-// ================= Chat rendering =================
+// Chat rendering
 function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function inline(s) {
   return escapeHtml(s)
@@ -799,7 +799,7 @@ function toast(msg) {
 function setBusy(v) { busy = v; typing(v); refreshSend(); }
 function refreshSend() { sendBtn.disabled = busy || !input.value.trim(); }
 
-// ================= API =================
+// API
 let passcode = storage(() => localStorage.getItem("passcode"), "") || "";
 async function api(path, init = {}) {
   const res = await fetch(path, { ...init, headers: { ...init.headers, "X-Passcode": encodeURIComponent(passcode) } });
@@ -878,7 +878,7 @@ async function decide(card, actionId, approve) {
   finally { setBusy(false); input.focus(); }
 }
 
-// ================= Calendar view =================
+// Calendar view
 // Day / week / month views of cal.com bookings, loaded straight from /api/agenda (no LLM).
 const HOUR_PX = 48;
 const cal = { view: matchMedia("(max-width: 900px)").matches ? "day" : "week", date: startOfDay(new Date()), cache: new Map(), items: [], h0: 7 };
@@ -1117,7 +1117,7 @@ $("mini-prev").onclick = () => { mini.month = new Date(mini.month.getFullYear(),
 $("mini-next").onclick = () => { mini.month = new Date(mini.month.getFullYear(), mini.month.getMonth() + 1, 1); drawMini(); };
 drawMini();
 
-// ================= Wiring =================
+// Wiring
 function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; refreshSend(); }
 input.addEventListener("input", autosize);
 input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });

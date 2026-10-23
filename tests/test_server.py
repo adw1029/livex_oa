@@ -65,8 +65,14 @@ async def test_create_rejects_taken_slot(mcp, cal):
     cal.seed("Board sync", cal.at(14))
     r = await mcp.call_tool(
         "create_booking",
-        {"event_type_id": 1, "start": tu.to_utc_z(cal.at(14)), "title": "Intro call with Jordan",
-         "attendee_name": "Jordan Lee", "attendee_email": "jordan@example.com", "attendee_timezone": TZ},
+        {
+            "event_type_id": 1,
+            "start": tu.to_utc_z(cal.at(14)),
+            "title": "Intro call with Jordan",
+            "attendee_name": "Jordan Lee",
+            "attendee_email": "jordan@example.com",
+            "attendee_timezone": TZ,
+        },
     )
     assert r.is_error and "no longer available" in r.content[0].text
     assert not [c for c in cal.calls if c[0] == "create_booking"]
@@ -75,8 +81,14 @@ async def test_create_rejects_taken_slot(mcp, cal):
 async def test_create_requires_real_email(mcp, cal):
     r = await mcp.call_tool(
         "create_booking",
-        {"event_type_id": 1, "start": tu.to_utc_z(cal.at(14)), "title": "Intro call with Jordan",
-         "attendee_name": "Jordan Lee", "attendee_email": "jordan", "attendee_timezone": TZ},
+        {
+            "event_type_id": 1,
+            "start": tu.to_utc_z(cal.at(14)),
+            "title": "Intro call with Jordan",
+            "attendee_name": "Jordan Lee",
+            "attendee_email": "jordan",
+            "attendee_timezone": TZ,
+        },
     )
     assert r.is_error and "email" in r.content[0].text
 
@@ -84,8 +96,14 @@ async def test_create_requires_real_email(mcp, cal):
 async def test_create_books_open_slot(mcp, cal):
     r = await mcp.call_tool(
         "create_booking",
-        {"event_type_id": 1, "start": tu.to_utc_z(cal.at(14)), "title": "Intro call with Jordan",
-         "attendee_name": "Jordan Lee", "attendee_email": "jordan@example.com", "attendee_timezone": TZ},
+        {
+            "event_type_id": 1,
+            "start": tu.to_utc_z(cal.at(14)),
+            "title": "Intro call with Jordan",
+            "attendee_name": "Jordan Lee",
+            "attendee_email": "jordan@example.com",
+            "attendee_timezone": TZ,
+        },
     )
     assert not r.is_error
     booked = r.structured_content["booked"]
@@ -101,7 +119,7 @@ async def test_reschedule_returns_new_uid_and_auto_confirms(mcp, cal):
     assert not r.is_error
     assert r.structured_content["previous_uid"] == uid
     assert r.structured_content["rescheduled"]["uid"] != uid
-    (_, args), = [c for c in cal.calls if c[0] == "reschedule_booking"]
+    ((_, args),) = [c for c in cal.calls if c[0] == "reschedule_booking"]
     assert args["rescheduled_by"] == "founder@example.com"
 
 
@@ -130,27 +148,45 @@ async def test_bad_timezone_is_a_clear_error(mcp, cal):
 
 
 async def test_duration_only_sent_for_multi_length_event_types(mcp, cal):
-    book = {"start": tu.to_utc_z(cal.at(14)), "title": "Intro call with Jordan", "attendee_name": "Jordan Lee",
-            "attendee_email": "jordan@example.com", "attendee_timezone": TZ}
+    book = {
+        "start": tu.to_utc_z(cal.at(14)),
+        "title": "Intro call with Jordan",
+        "attendee_name": "Jordan Lee",
+        "attendee_email": "jordan@example.com",
+        "attendee_timezone": TZ,
+    }
     # Fixed 30-min type: a matching duration is dropped (cal.com rejects it), a different one is refused.
     assert not (await mcp.call_tool("create_booking", {**book, "event_type_id": 1, "duration_minutes": 30})).is_error
     assert cal.calls[-1][1]["length_in_minutes"] is None
-    r = await mcp.call_tool("create_booking", {**book, "start": tu.to_utc_z(cal.at(15)), "event_type_id": 1, "duration_minutes": 60})
+    r = await mcp.call_tool(
+        "create_booking", {**book, "start": tu.to_utc_z(cal.at(15)), "event_type_id": 1, "duration_minutes": 60}
+    )
     assert r.is_error and "always 30 minutes" in r.content[0].text
 
     # Multi-length type: an offered duration goes to both the slot search and the booking.
-    r = await mcp.call_tool("find_available_slots", {"event_type_id": 2, "date_from": cal.day.isoformat(), "timezone": TZ, "duration_minutes": 60})
+    r = await mcp.call_tool(
+        "find_available_slots",
+        {"event_type_id": 2, "date_from": cal.day.isoformat(), "timezone": TZ, "duration_minutes": 60},
+    )
     assert not r.is_error and [c for c in cal.calls if c[0] == "get_slots"][-1][1]["duration"] == 60
-    assert not (await mcp.call_tool("create_booking", {**book, "start": tu.to_utc_z(cal.at(16)), "event_type_id": 2, "duration_minutes": 60})).is_error
+    assert not (
+        await mcp.call_tool(
+            "create_booking", {**book, "start": tu.to_utc_z(cal.at(16)), "event_type_id": 2, "duration_minutes": 60}
+        )
+    ).is_error
     named = [c for c in cal.calls if c[0] == "create_event_type"][-1][1]
     assert named["lengthInMinutes"] == 60  # the named meeting's own event type carries the length
-    r = await mcp.call_tool("create_booking", {**book, "start": tu.to_utc_z(cal.at(10)), "event_type_id": 2, "duration_minutes": 45})
+    r = await mcp.call_tool(
+        "create_booking", {**book, "start": tu.to_utc_z(cal.at(10)), "event_type_id": 2, "duration_minutes": 45}
+    )
     assert r.is_error and "15, 30, 60" in r.content[0].text
 
 
 async def test_stale_uid_after_reschedule_points_to_new_booking(mcp, cal):
     uid = cal.seed("Intro with Sam", cal.at(15))
-    moved = await mcp.call_tool("reschedule_booking", {"booking_uid": uid, "new_start": tu.to_utc_z(cal.at(16)), "timezone": TZ})
+    moved = await mcp.call_tool(
+        "reschedule_booking", {"booking_uid": uid, "new_start": tu.to_utc_z(cal.at(16)), "timezone": TZ}
+    )
     new_uid = moved.structured_content["rescheduled"]["uid"]
     r = await mcp.call_tool("cancel_booking", {"booking_uid": uid, "timezone": TZ})
     assert r.is_error and new_uid in r.content[0].text
@@ -159,39 +195,76 @@ async def test_stale_uid_after_reschedule_points_to_new_booking(mcp, cal):
 async def test_list_bookings_filters_by_attendee_email_and_event_type(mcp, cal):
     cal.seed("Intro with Sam", cal.at(10))
     jordan = cal.seed("Intro with Jordan", cal.at(11), attendee="Jordan Lee")
-    r = await mcp.call_tool("list_bookings", {"timezone": TZ, "attendee_email": "jordan@example.com", "event_type_id": 1})
+    r = await mcp.call_tool(
+        "list_bookings", {"timezone": TZ, "attendee_email": "jordan@example.com", "event_type_id": 1}
+    )
     assert [b["uid"] for b in r.structured_content["bookings"]] == [jordan]
-    assert cal.calls[-1] == ("list_bookings", {"status": "upcoming", "attendee_email": "jordan@example.com", "event_type_id": 1})
+    assert cal.calls[-1] == (
+        "list_bookings",
+        {"status": "upcoming", "attendee_email": "jordan@example.com", "event_type_id": 1},
+    )
 
 
-BOOK = {"title": "Intro call with Jordan", "attendee_name": "Jordan Lee", "attendee_email": "jordan@example.com", "attendee_timezone": TZ}
+BOOK = {
+    "title": "Intro call with Jordan",
+    "attendee_name": "Jordan Lee",
+    "attendee_email": "jordan@example.com",
+    "attendee_timezone": TZ,
+}
 
 
 async def test_location_must_be_one_the_event_type_allows(mcp, cal):
     r = await mcp.call_tool("list_event_types", {})
     office = r.structured_content["event_types"][1]
     assert office["location_options"] == [
-        {"option": "zoom", "value": None}, {"option": "address", "value": "1 Market St"}, {"option": "attendeeDefined", "value": None},
+        {"option": "zoom", "value": None},
+        {"option": "address", "value": "1 Market St"},
+        {"option": "attendeeDefined", "value": None},
     ]
     # The 30 Min Intro only offers Cal Video, so a custom place is refused with the allowed options.
-    r = await mcp.call_tool("create_booking", {**BOOK, "event_type_id": 1, "start": tu.to_utc_z(cal.at(14)),
-                                               "location": "attendeeDefined", "location_detail": "Blue Bottle"})
+    r = await mcp.call_tool(
+        "create_booking",
+        {
+            **BOOK,
+            "event_type_id": 1,
+            "start": tu.to_utc_z(cal.at(14)),
+            "location": "attendeeDefined",
+            "location_detail": "Blue Bottle",
+        },
+    )
     assert r.is_error and "cal-video" in r.content[0].text
     # Attendee-defined places need the place itself.
-    r = await mcp.call_tool("create_booking", {**BOOK, "event_type_id": 2, "start": tu.to_utc_z(cal.at(14)), "location": "attendeeDefined"})
+    r = await mcp.call_tool(
+        "create_booking", {**BOOK, "event_type_id": 2, "start": tu.to_utc_z(cal.at(14)), "location": "attendeeDefined"}
+    )
     assert r.is_error and "Ask the user for the location" in r.content[0].text
 
-    await mcp.call_tool("create_booking", {**BOOK, "event_type_id": 2, "start": tu.to_utc_z(cal.at(14)),
-                                           "location": "attendeeDefined", "location_detail": "Blue Bottle, Market St"})
+    await mcp.call_tool(
+        "create_booking",
+        {
+            **BOOK,
+            "event_type_id": 2,
+            "start": tu.to_utc_z(cal.at(14)),
+            "location": "attendeeDefined",
+            "location_detail": "Blue Bottle, Market St",
+        },
+    )
     assert cal.calls[-1][1]["location"] == {"type": "attendeeDefined", "location": "Blue Bottle, Market St"}
-    await mcp.call_tool("create_booking", {**BOOK, "event_type_id": 2, "start": tu.to_utc_z(cal.at(15)), "location": "zoom"})
+    await mcp.call_tool(
+        "create_booking", {**BOOK, "event_type_id": 2, "start": tu.to_utc_z(cal.at(15)), "location": "zoom"}
+    )
     assert cal.calls[-1][1]["location"] == {"type": "integration", "integration": "zoom"}
 
 
 async def test_guests_are_validated_and_passed_through(mcp, cal):
-    r = await mcp.call_tool("create_booking", {**BOOK, "event_type_id": 1, "start": tu.to_utc_z(cal.at(14)), "guests": ["sam@", "ok@example.com"]})
+    r = await mcp.call_tool(
+        "create_booking",
+        {**BOOK, "event_type_id": 1, "start": tu.to_utc_z(cal.at(14)), "guests": ["sam@", "ok@example.com"]},
+    )
     assert r.is_error and "sam@" in r.content[0].text
-    r = await mcp.call_tool("create_booking", {**BOOK, "event_type_id": 1, "start": tu.to_utc_z(cal.at(14)), "guests": ["sam@example.com"]})
+    r = await mcp.call_tool(
+        "create_booking", {**BOOK, "event_type_id": 1, "start": tu.to_utc_z(cal.at(14)), "guests": ["sam@example.com"]}
+    )
     assert not r.is_error and cal.calls[-1][1]["guests"] == ["sam@example.com"]
 
 
@@ -214,10 +287,11 @@ async def test_recurring_event_type_returns_every_occurrence(mcp, cal):
     assert r.structured_content["booked"]["uid"] == "r0" and len(r.structured_content["occurrences"]) == 3
 
 
-
 async def test_meeting_is_booked_under_its_name(mcp, cal):
-    r = await mcp.call_tool("create_booking", {**BOOK, "title": "Investor sync", "event_type_id": 2,
-                                               "start": tu.to_utc_z(cal.at(14)), "location": "zoom"})
+    r = await mcp.call_tool(
+        "create_booking",
+        {**BOOK, "title": "Investor sync", "event_type_id": 2, "start": tu.to_utc_z(cal.at(14)), "location": "zoom"},
+    )
     assert not r.is_error and r.structured_content["booked"]["title"] == "Investor sync"
     named = next(c[1] for c in cal.calls if c[0] == "create_event_type")
     assert named["title"] == "Investor sync" and named["hidden"] and named["customName"] == "{Event type title}"
@@ -238,24 +312,40 @@ async def test_failed_booking_removes_its_one_off_event_type(mcp, cal):
     assert len(cal.event_types) == 2
 
 
-
 async def test_cancelling_a_named_meeting_removes_its_one_off_type(mcp, cal):
-    r = await mcp.call_tool("create_booking", {**BOOK, "title": "Investor sync", "event_type_id": 1, "start": tu.to_utc_z(cal.at(14))})
+    r = await mcp.call_tool(
+        "create_booking", {**BOOK, "title": "Investor sync", "event_type_id": 1, "start": tu.to_utc_z(cal.at(14))}
+    )
     uid = r.structured_content["booked"]["uid"]
-    moved = await mcp.call_tool("reschedule_booking", {"booking_uid": uid, "new_start": tu.to_utc_z(cal.at(15)), "timezone": TZ})
+    moved = await mcp.call_tool(
+        "reschedule_booking", {"booking_uid": uid, "new_start": tu.to_utc_z(cal.at(15)), "timezone": TZ}
+    )
     assert not [c for c in cal.calls if c[0] == "delete_event_type"]  # still in use after the move
-    await mcp.call_tool("cancel_booking", {"booking_uid": moved.structured_content["rescheduled"]["uid"], "timezone": TZ})
+    await mcp.call_tool(
+        "cancel_booking", {"booking_uid": moved.structured_content["rescheduled"]["uid"], "timezone": TZ}
+    )
     assert [c[0] for c in cal.calls].count("delete_event_type") == 1
     assert [e["title"] for e in cal.event_types] == ["30 Min Intro", "Office Hours"]
 
 
 async def test_update_rebooks_the_same_meeting_with_corrections(mcp, cal):
-    r = await mcp.call_tool("create_booking", {
-        **BOOK, "event_type_id": 2, "start": tu.to_utc_z(cal.at(14)), "duration_minutes": 60,
-        "location": "attendeeDefined", "location_detail": "Blue Bottle", "guests": ["ops@example.com"], "notes": "bring deck",
-    })
+    r = await mcp.call_tool(
+        "create_booking",
+        {
+            **BOOK,
+            "event_type_id": 2,
+            "start": tu.to_utc_z(cal.at(14)),
+            "duration_minutes": 60,
+            "location": "attendeeDefined",
+            "location_detail": "Blue Bottle",
+            "guests": ["ops@example.com"],
+            "notes": "bring deck",
+        },
+    )
     old = r.structured_content["booked"]
-    r = await mcp.call_tool("update_booking", {"booking_uid": old["uid"], "timezone": TZ, "attendee_email": "jordan@lee.dev"})
+    r = await mcp.call_tool(
+        "update_booking", {"booking_uid": old["uid"], "timezone": TZ, "attendee_email": "jordan@lee.dev"}
+    )
     assert not r.is_error, r.content[0].text
     new = r.structured_content["updated"]
     assert r.structured_content["previous_uid"] == old["uid"] and new["uid"] != old["uid"]
@@ -263,9 +353,15 @@ async def test_update_rebooks_the_same_meeting_with_corrections(mcp, cal):
     assert new["attendees"] == [{"name": "Jordan Lee", "email": "jordan@lee.dev"}]
     rebook = [c[1] for c in cal.calls if c[0] == "create_booking"][-1]
     assert rebook["location"] == {"type": "attendeeDefined", "location": "Blue Bottle"}
-    assert rebook["guests"] == ["ops@example.com"] and rebook["allow_conflicts"] is True  # the original holds the slot until cancelled
+    assert (
+        rebook["guests"] == ["ops@example.com"] and rebook["allow_conflicts"] is True
+    )  # the original holds the slot until cancelled
     assert cal.bookings[old["uid"]]["status"] == "cancelled"
-    assert [e["title"] for e in cal.event_types] == ["30 Min Intro", "Office Hours", "Intro call with Jordan"]  # old one-off removed
+    assert [e["title"] for e in cal.event_types] == [
+        "30 Min Intro",
+        "Office Hours",
+        "Intro call with Jordan",
+    ]  # old one-off removed
 
 
 async def test_update_renames_and_guards(mcp, cal):
