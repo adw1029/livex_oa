@@ -4,8 +4,6 @@ A chat assistant that manages a cal.com calendar in plain language. It's built f
 type "book a 30-min intro with a candidate Thursday afternoon" than click through forms. It can book, list,
 reschedule, update and cancel meetings.
 
-**Live demo:** https://d8f0ss1s0decm.cloudfront.net (the access code is in my submission email)
-
 ![The assistant showing open times and a booking confirmation](docs/screenshot.png)
 
 ## Features
