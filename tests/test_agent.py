@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 import pytest
@@ -39,9 +40,15 @@ async def make_agent(mcp, *script):
 def book_call(cal: FakeCal, hh: int = 14):
     return call(
         "create_booking",
-        {"event_type_id": 1, "start": tu.to_utc_z(cal.at(hh)), "title": "Intro call with Jordan", "attendee_name": "Jordan Lee",
-         "attendee_email": "jordan@example.com", "attendee_timezone": TZ},
-        text="Here's the booking — confirm below.",
+        {
+            "event_type_id": 1,
+            "start": tu.to_utc_z(cal.at(hh)),
+            "title": "Intro call with Jordan",
+            "attendee_name": "Jordan Lee",
+            "attendee_email": "jordan@example.com",
+            "attendee_timezone": TZ,
+        },
+        text="Here's the booking. Confirm below.",
     )
 
 
@@ -73,7 +80,10 @@ async def test_only_times_cal_com_returned_reach_the_time_picker(mcp, cal):
     real, invented = tu.to_utc_z(cal.at(14)), tu.to_utc_z(cal.at(14, 15))
     agent, _ = await make_agent(
         mcp,
-        call("find_available_slots", {"event_type_id": 1, "date_from": cal.day.isoformat(), "timezone": TZ, "part_of_day": "afternoon"}),
+        call(
+            "find_available_slots",
+            {"event_type_id": 1, "date_from": cal.day.isoformat(), "timezone": TZ, "part_of_day": "afternoon"},
+        ),
         answer("Two openings Thursday afternoon.", times=[real, invented]),
     )
     turn = await agent.chat(Session("s", timezone=TZ), "thursday afternoon?", TZ)
@@ -83,7 +93,8 @@ async def test_only_times_cal_com_returned_reach_the_time_picker(mcp, cal):
     assert invented not in [t["start"] for t in turn.times]
 
 
-async def test_write_waits_for_confirm_then_executes(mcp, cal):
+async def test_write_waits_for_confirm_then_executes(mcp, cal, caplog):
+    caplog.set_level(logging.INFO, logger="agent")
     agent, llm = await make_agent(mcp, book_call(cal))
     session = Session("s", timezone=TZ)
     turn = await agent.chat(session, "book jordan thursday 2pm, jordan@example.com", TZ)
@@ -92,13 +103,13 @@ async def test_write_waits_for_confirm_then_executes(mcp, cal):
     assert "Jordan Lee" in turn.pending_action["items"][0]["detail"]
     assert not [c for c in cal.calls if c[0] == "create_booking"], "nothing may be written before Confirm"
 
-    llm.push(reply("Booked — Jordan has the invite."))
+    llm.push(reply("Booked. Jordan has the invite."))
     done = await agent.confirm(session, turn.pending_action["id"], approve=True)
     assert done.calendar_changed and done.reply.startswith("Booked")
     assert len([c for c in cal.calls if c[0] == "create_booking"]) == 1
     result = tool_results(llm.seen[-1][-1])["tu_create_booking"]
     assert not result["is_error"]
-    assert agent.audit == [{"session": "s", "tool": "create_booking", "input": book_call(cal).content[1].input, "ok": True}]
+    assert "write session=s tool=create_booking ok=True" in caplog.text
 
 
 async def test_pending_action_survives_save_and_load(mcp, cal):
@@ -136,7 +147,7 @@ async def test_typed_yes_counts_as_confirm(mcp, cal):
 
 
 async def test_changing_the_subject_closes_pending_without_writing(mcp, cal):
-    agent, llm = await make_agent(mcp, book_call(cal), reply("Sure — what time instead?"))
+    agent, llm = await make_agent(mcp, book_call(cal), reply("Sure, what time instead?"))
     session = Session("s", timezone=TZ)
     await agent.chat(session, "book it", TZ)
     await agent.chat(session, "actually make it 4pm", TZ)
@@ -167,7 +178,7 @@ async def test_reschedule_card_names_the_meeting(mcp, cal):
 
 
 async def test_every_tool_use_gets_a_result(mcp, cal):
-    """The API rejects histories with an unanswered tool_use — check the transcript stays well-formed."""
+    """The API rejects histories with an unanswered tool_use, so check the transcript stays well-formed."""
     agent, llm = await make_agent(mcp, book_call(cal), reply("ok"), reply("ok"))
     session = Session("s", timezone=TZ)
     await agent.chat(session, "book it", TZ)
@@ -184,7 +195,10 @@ async def test_every_tool_use_gets_a_result(mcp, cal):
 async def test_identical_lookup_is_not_repeated_within_a_request(mcp, cal):
     args = {"event_type_id": 1, "date_from": cal.day.isoformat(), "timezone": TZ}
     agent, llm = await make_agent(
-        mcp, call("find_available_slots", args, call_id="a"), call("find_available_slots", args, call_id="b"), answer("Done."),
+        mcp,
+        call("find_available_slots", args, call_id="a"),
+        call("find_available_slots", args, call_id="b"),
+        answer("Done."),
     )
     await agent.chat(Session("s", timezone=TZ), "thursday?", TZ)
     assert len([c for c in cal.calls if c[0] == "get_slots"]) == 1
@@ -193,8 +207,15 @@ async def test_identical_lookup_is_not_repeated_within_a_request(mcp, cal):
 
 async def test_out_of_rounds_answers_with_tools_off(mcp, cal):
     from app.agent import MAX_ROUNDS
-    lookups = [call("list_bookings", {"timezone": TZ, "date_from": cal.day.isoformat(), "attendee_name": f"x{i}"}, call_id=f"c{i}")
-               for i in range(MAX_ROUNDS)]
+
+    lookups = [
+        call(
+            "list_bookings",
+            {"timezone": TZ, "date_from": cal.day.isoformat(), "attendee_name": f"x{i}"},
+            call_id=f"c{i}",
+        )
+        for i in range(MAX_ROUNDS)
+    ]
     agent, llm = await make_agent(mcp, *lookups, answer("Nothing on Thursday."))
     turn = await agent.chat(Session("s", timezone=TZ), "thursday?", TZ)
     assert turn.reply == "Nothing on Thursday."
@@ -206,8 +227,10 @@ async def test_suggestions_across_days_show_without_full_day_table(mcp, cal):
     cal.open.add(fri)
     agent, _ = await make_agent(
         mcp,
-        call("find_available_slots", {"event_type_id": 1, "date_from": cal.day.isoformat(),
-                                      "date_to": fri.date().isoformat(), "timezone": TZ}),
+        call(
+            "find_available_slots",
+            {"event_type_id": 1, "date_from": cal.day.isoformat(), "date_to": fri.date().isoformat(), "timezone": TZ},
+        ),
         answer("Thursday or Friday?", times=[tu.to_utc_z(thu), tu.to_utc_z(fri)]),
     )
     turn = await agent.chat(Session("s", timezone=TZ), "this week?", TZ)
@@ -220,12 +243,25 @@ async def test_malformed_times_from_the_model_are_skipped(mcp, cal):
     assert turn.reply == "Here you go." and turn.times == []
 
 
+async def test_empty_or_repeated_calls_make_the_model_answer(mcp, cal):
+    agent, llm = await make_agent(
+        mcp,
+        call("create_booking", {}, call_id="a"),
+        answer("Which time works, and who is it with?"),
+    )
+    turn = await agent.chat(Session("s", timezone=TZ), "book a call tomorrow afternoon", TZ)
+    assert turn.reply == "Which time works, and who is it with?"
+    assert llm.tool_choices == [None, {"type": "none"}]
+    assert not [c for c in cal.calls if c[0] == "create_booking"]
+
+
 async def test_incomplete_change_goes_back_to_the_model_not_to_a_card(mcp, cal):
     good = book_call(cal)
     bad = call("create_booking", {**good.content[-1].input, "start": None}, call_id="tu_bad")
     agent, llm = await make_agent(mcp, bad, good)
     turn = await agent.chat(Session("s", timezone=TZ), "book Jordan at 2", TZ)
     assert "missing start" in tool_results(llm.seen[1][-1])["tu_bad"]["content"]
+    assert llm.tool_choices[1] is None  # a half-filled change gets a retry with tools on
     assert turn.pending_action and turn.pending_action["items"][0]["title"] == "Intro call with Jordan"
     assert not [c for c in cal.calls if c[0] == "create_booking"]
 
@@ -239,5 +275,9 @@ async def test_update_card_shows_what_changes_and_writes_nothing_yet(mcp, cal):
     )
     turn = await agent.chat(Session("s", timezone=TZ), "wrong email for Sam, it's sam@rivera.dev", TZ)
     item = turn.pending_action["items"][0]
-    assert (item["action"], item["title"], item["detail"]) == ("Update", "Intro with Sam", "Email: sam@example.com → sam@rivera.dev")
+    assert (item["action"], item["title"], item["detail"]) == (
+        "Update",
+        "Intro with Sam",
+        "Email: sam@example.com → sam@rivera.dev",
+    )
     assert not [c for c in cal.calls if c[0] in ("create_booking", "cancel_booking")]

@@ -2,7 +2,7 @@
 
 The gate is enforced in code from MCP tool annotations: any tool not marked
 `readOnlyHint` is held as a pending action and only executed after the user
-explicitly confirms. The model never sees a fake result — the tool_use stays
+explicitly confirms. The model never sees a fake result: the tool_use stays
 open until the user decides, then gets the real outcome.
 """
 
@@ -14,6 +14,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from mcp import Client
@@ -23,6 +24,8 @@ from calcom_mcp import timeutil as tu
 log = logging.getLogger("agent")
 
 MAX_ROUNDS = 8
+REPEAT_CALL = "You already made this exact call for this request; use that result and answer."
+NOT_RUN = "Not run: missing"
 YES_RE = re.compile(
     r"^\s*(y|yes|yep|yeah|yup|sure|ok|okay|confirm(ed)?|do it|go ahead|book it|sounds good|perfect|please do)\b[\s.!]*$",
     re.IGNORECASE,
@@ -37,8 +40,9 @@ How you work:
 - Results from earlier messages in the conversation may be stale (the user can change things in cal.com any time): \
 fetch again for a new request, and before saying something isn't possible. Within one request, use what you just \
 fetched; never repeat a call with the same arguments.
-- Ask only for what you truly need, all in one message. A new booking needs the attendee's name and email plus a time; \
-the length defaults to the event type's, so don't ask about it unless the user brought it up. \
+- Ask only for what you truly need, all in one message. A new booking needs the attendee's name and email plus a time. \
+The attendee is the person the founder is meeting, never the founder; if the user hasn't said who, ask. The length \
+defaults to the event type's, so don't ask about it unless the user brought it up. \
 Pick the event type yourself when the request makes it clear (e.g. "30-min intro"); ask only if it's ambiguous.
 - For a length no fixed event type has (e.g. 90 min), use an event type whose duration_options include it, \
 including hidden ones, and pass duration_minutes. If none offers it, say which lengths are available.
@@ -57,8 +61,9 @@ If more than one matches, ask which one.
 conversation, like "Intro call with Andy" or "Investor sync". Don't ask for a name.
 - To fix an existing meeting's name or its attendee's name or email, call update_booking with just what changes. \
 It rebooks the same meeting with the corrections and cancels the original; don't cancel and rebook yourself.
-- Changes (create, reschedule, update, cancel): once you have everything, call the tool directly. The app shows a confirmation \
-card and only runs the action after the user clicks Confirm, so never ask "shall I book it?".
+- Changes (create, reschedule, update, cancel): once you have everything, call the tool directly. The app shows a \
+confirmation card and only runs the action after the user clicks Confirm, so never ask "shall I book it?". Never call \
+a change tool with empty or guessed values: if anything is missing, stop calling tools and ask for it in your reply.
 - If a tool result says the user declined or didn't confirm, acknowledge briefly and don't retry unless asked.
 - Rescheduling or updating gives the booking a NEW uid. Use the new uid for any follow-up.
 
@@ -95,6 +100,10 @@ REPLY_FORMAT = {
         "additionalProperties": False,
     },
 }
+
+
+def tool_result(call_id: str, content: str, is_error: bool = False) -> dict[str, Any]:
+    return {"type": "tool_result", "tool_use_id": call_id, "content": content, "is_error": is_error}
 
 
 @dataclass
@@ -144,7 +153,6 @@ class Agent:
         self.mcp = mcp
         self.tools: list[dict[str, Any]] = []
         self.gated: set[str] = set()
-        self.audit: list[dict[str, Any]] = []
 
     async def start(self) -> None:
         listing = await self.mcp.list_tools()
@@ -154,8 +162,6 @@ class Agent:
         # Anything not explicitly read-only changes the calendar and needs a human click.
         self.gated = {t.name for t in listing.tools if not (t.annotations and t.annotations.read_only_hint)}
         log.info("tools=%s gated=%s", [t["name"] for t in self.tools], sorted(self.gated))
-
-    # ---- public entry points -------------------------------------------------
 
     async def chat(self, session: Session, text: str, timezone: str | None = None) -> Turn:
         async with session.lock:
@@ -181,15 +187,13 @@ class Agent:
         async with session.lock:
             pending = session.pending
             if not pending or pending.id != action_id:
-                return Turn(reply="That request has expired — nothing was changed. What would you like to do?")
+                return Turn(reply="That request has expired, so nothing was changed. What would you like to do?")
             return await self._resolve(session, pending, approve)
-
-    # ---- internals -----------------------------------------------------------
 
     async def _resolve(self, session: Session, pending: PendingAction, approve: bool) -> Turn:
         session.pending = None
         if approve:
-            results = [await self._execute(session, call, audit=True) for call in pending.calls]
+            results = [await self._execute(session, call, write=True) for call in pending.calls]
             changed = any(not r.get("is_error") for r in results)
         else:
             results = self._decline(pending, "The user clicked Cancel. Nothing was changed.")
@@ -200,35 +204,39 @@ class Agent:
         return turn
 
     def _decline(self, pending: PendingAction, reason: str) -> list[dict[str, Any]]:
-        return [{"type": "tool_result", "tool_use_id": c.id, "content": reason, "is_error": True} for c in pending.calls]
+        return [tool_result(c.id, reason, is_error=True) for c in pending.calls]
 
     async def _run(self, session: Session) -> Turn:
         system = [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
         seen: set[str] = set()  # read-only calls made for this request
         session.offered = []
+        stuck = 0  # consecutive rounds in which every call was turned away; at 2 the model must answer
         for _ in range(MAX_ROUNDS):
-            response = await self.llm.create(system=system, tools=self.tools, messages=session.messages)
-            # Append the full content (thinking, text, tool_use blocks) unchanged — history stays append-only.
+            tool_choice = {"type": "none"} if stuck >= 2 else None
+            response = await self.llm.create(
+                system=system, tools=self.tools, messages=session.messages, tool_choice=tool_choice
+            )
+            # Append the full content (thinking, text, tool_use blocks) unchanged, so history stays append-only.
             session.messages.append({"role": "assistant", "content": response.content})
             text = "".join(b.text for b in response.content if b.type == "text").strip()
 
             if response.stop_reason == "refusal":
-                return Turn(reply="Sorry — I can't help with that one. Anything on your calendar I can do instead?")
+                return Turn(reply="Sorry, I can't help with that one. Anything on your calendar I can do instead?")
             if response.stop_reason != "tool_use":
                 if response.stop_reason == "max_tokens":
                     return Turn(reply="That answer ran long and got cut off. Could you ask for a bit less at once?")
                 return self._final(session, text)
 
             calls = [b for b in response.content if b.type == "tool_use"]
-            ready = list(await asyncio.gather(*(self._read(session, c, seen) for c in calls if c.name not in self.gated)))
-            gated = []
-            for c in (c for c in calls if c.name in self.gated):
-                # A card for a change that can't run (e.g. a booking with no start) would only fail on Confirm.
+            ready, reads, gated = [], [], []
+            for c in calls:
+                # A call missing required inputs can't do anything useful; a card for one would only fail on Confirm.
                 if missing := self._missing(c):
-                    ready.append({"type": "tool_result", "tool_use_id": c.id, "is_error": True,
-                                  "content": f"Not run: missing {', '.join(missing)}."})
+                    message = f"{NOT_RUN} {', '.join(missing)}. If you don't have these yet, ask the user instead."
+                    ready.append(tool_result(c.id, message, is_error=True))
                 else:
-                    gated.append(c)
+                    (gated if c.name in self.gated else reads).append(c)
+            ready += await asyncio.gather(*(self._read(session, c, seen) for c in reads))
             if gated:
                 pending = PendingAction(
                     id=uuid.uuid4().hex[:12],
@@ -241,6 +249,11 @@ class Agent:
                 turn.pending_action = {"id": pending.id, "items": pending.items}
                 return turn
             session.messages.append({"role": "user", "content": list(ready)})
+            if all(r["content"] == REPEAT_CALL or str(r["content"]).startswith(NOT_RUN) for r in ready):
+                # A repeat or an empty call means there's nothing new to try; a half-filled change gets one retry.
+                stuck += 1 if any(c.input and self._missing(c) for c in calls) else 2
+            else:
+                stuck = 0
 
         # Out of rounds: answer from what was gathered (tools off) rather than give up.
         response = await self.llm.create(
@@ -271,13 +284,20 @@ class Agent:
                 picks.append(start)
         # When the suggestions are on one day, show every open time that day with them highlighted;
         # across several days the day isn't settled yet, so show just the suggestions.
-        day_of = lambda s: tu.parse_iso(s).astimezone(tz).date()
+
+        def day_of(start: str) -> date:
+            return tu.parse_iso(start).astimezone(tz).date()
+
         days = {day_of(p) for p in picks}
-        shown = sorted(set(picks) | {s for s in session.offered if day_of(s) in days}) if len(days) == 1 else sorted(picks)
+        shown = (
+            sorted(set(picks) | {s for s in session.offered if day_of(s) in days}) if len(days) == 1 else sorted(picks)
+        )
         times = []
         for start in shown:
             local = tu.parse_iso(start).astimezone(tz)
-            times.append({"start": start, "day": tu.fmt_day(local), "time": tu.fmt_time(local), "suggested": start in picks})
+            times.append(
+                {"start": start, "day": tu.fmt_day(local), "time": tu.fmt_time(local), "suggested": start in picks}
+            )
         meetings = [session.bookings[uid] for uid in data.get("meetings") or [] if uid in session.bookings]
         replies = [r.strip() for r in data.get("replies") or [] if r.strip()][:5]
         return Turn(reply=(data.get("message") or "").strip(), times=times, meetings=meetings, suggestions=replies)
@@ -290,17 +310,16 @@ class Agent:
         """Run a read-only tool, but don't let the model re-run an identical lookup in a loop."""
         key = call.name + json.dumps(call.input, sort_keys=True)
         if key in seen:
-            return {"type": "tool_result", "tool_use_id": call.id, "is_error": True,
-                    "content": "You already made this exact call for this request; use that result and answer."}
+            return tool_result(call.id, REPEAT_CALL, is_error=True)
         seen.add(key)
         return await self._execute(session, call)
 
-    async def _execute(self, session: Session, call: Any, audit: bool = False) -> dict[str, Any]:
+    async def _execute(self, session: Session, call: Any, write: bool = False) -> dict[str, Any]:
         try:
             result = await self.mcp.call_tool(call.name, call.input)
         except Exception as e:  # transport-level failure; surface it to the model as a tool error
             log.exception("tool %s failed", call.name)
-            return {"type": "tool_result", "tool_use_id": call.id, "content": f"Tool failed: {e}", "is_error": True}
+            return tool_result(call.id, f"Tool failed: {e}", is_error=True)
 
         data = result.structured_content
         if data is not None:
@@ -308,11 +327,9 @@ class Agent:
             payload = json.dumps(data, ensure_ascii=False)
         else:
             payload = "\n".join(getattr(c, "text", "") for c in result.content) or "(no output)"
-        if audit:
-            entry = {"session": session.id, "tool": call.name, "input": call.input, "ok": not result.is_error}
-            self.audit.append(entry)
-            log.info("write %s", entry)
-        return {"type": "tool_result", "tool_use_id": call.id, "content": payload, "is_error": bool(result.is_error)}
+        if write:  # the audit trail of calendar changes, in CloudWatch on AWS
+            log.info("write session=%s tool=%s ok=%s input=%s", session.id, call.name, not result.is_error, call.input)
+        return tool_result(call.id, payload, is_error=bool(result.is_error))
 
     def _remember(self, session: Session, data: dict[str, Any]) -> None:
         """Cache bookings, event types and offered slots, for confirmation cards and to validate the reply."""
@@ -356,7 +373,12 @@ class Agent:
         booking = session.bookings.get(args.get("booking_uid"), {})
         title = booking.get("title") or f"Booking {args.get('booking_uid')}"
         if call.name == "reschedule_booking":
-            return {"action": "Reschedule", "title": title, "when": when(args.get("new_start")), "detail": f"from {booking.get('when', 'its current time')}"}
+            return {
+                "action": "Reschedule",
+                "title": title,
+                "when": when(args.get("new_start")),
+                "detail": f"from {booking.get('when', 'its current time')}",
+            }
         if call.name == "update_booking":
             attendee = (booking.get("attendees") or [{}])[0]
             changes = [
@@ -364,8 +386,17 @@ class Agent:
                 for label, field in (("Attendee", "name"), ("Email", "email"))
                 if args.get("attendee_" + field) and args["attendee_" + field] != attendee.get(field)
             ]
-            return {"action": "Update", "title": args.get("title") or title, "when": booking.get("when", ""),
-                    "detail": " · ".join(changes) or f"was {title}"}
+            return {
+                "action": "Update",
+                "title": args.get("title") or title,
+                "when": booking.get("when", ""),
+                "detail": " · ".join(changes) or f"was {title}",
+            }
         if call.name == "cancel_booking":
-            return {"action": "Cancel", "title": title, "when": booking.get("when", ""), "detail": args.get("reason") or ""}
+            return {
+                "action": "Cancel",
+                "title": title,
+                "when": booking.get("when", ""),
+                "detail": args.get("reason") or "",
+            }
         return {"action": call.name, "title": "", "when": "", "detail": json.dumps(args)}
