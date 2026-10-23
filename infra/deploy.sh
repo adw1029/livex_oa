@@ -7,15 +7,18 @@ export AWS_PROFILE="${AWS_PROFILE:-adw}" AWS_REGION="${AWS_REGION:-us-east-1}"
 STACK=livex-assistant
 PYTHON="${PYTHON:-.venv/bin/python}"
 
+# Dependencies go in a layer (Lambda adds /opt/python to PYTHONPATH); the function holds only our code.
 # Linux arm64 wheels for the Lambda runtime, so this works from a Mac without Docker.
-rm -rf .build && mkdir -p .build/function
-"$PYTHON" -m pip install -q --group app -t .build/function \
+rm -rf .build && mkdir -p .build/deps/python .build/function
+"$PYTHON" -m pip install -q --group app -t .build/deps/python \
   --platform manylinux2014_aarch64 --implementation cp --python-version 3.13 --only-binary=:all:
 cp -R app calcom_mcp infra/run.sh .build/function/
 find .build/function -name __pycache__ -prune -exec rm -rf {} +
+# Zipping changes file mtimes, which makes timestamp-checked .pyc look stale and recompile on every cold start.
+"$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash .build/deps/python .build/function
 
 sam deploy --template-file infra/template.yaml --stack-name "$STACK" --resolve-s3 \
-  --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset
+  --capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset
 
 out() { aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 aws s3 sync app/static "s3://$(out BucketName)" --delete

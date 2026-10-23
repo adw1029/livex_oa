@@ -10,40 +10,71 @@ Parameters:
     Type: String
     Default: /livex-assistant
 
+# Resources are named after the stack (e.g. livex-assistant-app) instead of CloudFormation's random suffixes.
 Resources:
-  # ---------- API: FastAPI on Lambda (Lambda Web Adapter runs uvicorn as-is) ----------
+  # API: FastAPI on Lambda (Lambda Web Adapter runs uvicorn as-is)
   AppFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../.build/function # built by deploy.sh
+      FunctionName: !Sub ${AWS::StackName}-app
+      Role: !GetAtt AppRole.Arn
+      CodeUri: ../.build/function # our code only; built by deploy.sh
       Handler: run.sh
       Runtime: python3.13
       Architectures: [arm64]
-      MemorySize: 1024
+      MemorySize: 2048 # CPU scales with memory; startup (imports + MCP server) is CPU-bound
       Timeout: 60
       Layers:
         - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerArm64:30
+        - !Ref DepsLayer
       Environment:
         Variables:
           AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
           AWS_LWA_PORT: "8080"
           AWS_LWA_READINESS_CHECK_PATH: /api/health
+          AWS_LWA_ASYNC_INIT: "true" # keep waiting in the first request instead of hitting the 10 s init limit
           SSM_PREFIX: !Ref SsmPrefix
           SESSIONS_TABLE: !Ref SessionsTable
           LLM_PROVIDER: anthropic
       FunctionUrlConfig:
         AuthType: NONE # access is gated by the app's passcode check
+
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-app-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SessionsTable
-        - Statement:
-            - Effect: Allow
-              Action: ssm:GetParameters
-              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/*
+        - PolicyName: app
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem]
+                Resource: !GetAtt SessionsTable.Arn
+              - Effect: Allow
+                Action: ssm:GetParameters
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/*
+
+  DepsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub ${AWS::StackName}-deps
+      Description: Python dependencies for the app (pyproject.toml `app` group)
+      ContentUri: ../.build/deps # built by deploy.sh
+      CompatibleRuntimes: [python3.13]
+      CompatibleArchitectures: [arm64]
+      RetentionPolicy: Delete
 
   SessionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
+      TableName: !Sub ${AWS::StackName}-sessions
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - { AttributeName: id, AttributeType: S }
@@ -53,10 +84,11 @@ Resources:
         AttributeName: expires_at
         Enabled: true
 
-  # ---------- UI: private S3 bucket behind CloudFront ----------
+  # UI: private S3 bucket behind CloudFront
   WebBucket:
     Type: AWS::S3::Bucket
     Properties:
+      BucketName: !Sub ${AWS::StackName}-web-${AWS::AccountId} # bucket names are global, so add the account id
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import os
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timedelta
@@ -43,7 +44,12 @@ async def lifespan(app: FastAPI):
     server = StdioServerParameters(
         command=sys.executable,
         args=["-m", "calcom_mcp.server"],
-        env={"CAL_API_KEY": settings.cal_api_key, "CAL_API_BASE": settings.cal_api_base},
+        # PYTHONPATH carries the Lambda layer's packages; the MCP client doesn't inherit it by default.
+        env={
+            "CAL_API_KEY": settings.cal_api_key,
+            "CAL_API_BASE": settings.cal_api_base,
+            **({"PYTHONPATH": os.environ["PYTHONPATH"]} if "PYTHONPATH" in os.environ else {}),
+        },
         cwd=ROOT,
     )
     async with AsyncExitStack() as stack:
